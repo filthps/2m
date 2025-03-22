@@ -716,8 +716,8 @@ class TestORMHelper(unittest.TestCase, SetUp):
         self.assertEqual(database_data.items[0]["Cnc"]["cncid"], database_data.items[0]["Machine"]["cncid"])
         self.assertIn("machineid", local_data.items[0]["Machine"])
         self.assertIn("machineid", database_data.items[0]["Machine"])
-        self.assertNotEqual(local_data.items[0]["Machine"]["machineid"], database_data.items[0]["Machine"]["machineid"])
-        self.assertEqual("Fidia", local_data.items[0]["Machine"]["machinename"])
+        self.assertNotEqual(local_data.items[0]["Machine"]["machinename"], database_data.items[0]["Machine"]["machinename"])
+        self.assertEqual("Tesm", local_data.items[0]["Machine"]["machinename"])
         self.assertEqual("Ram", local_data.items[0]["Cnc"]["name"])
         self.assertNotEqual(local_data.items[0]["Cnc"]["name"], database_data.items[0]["Cnc"]["name"])
         #
