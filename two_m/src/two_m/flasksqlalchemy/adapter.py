@@ -38,7 +38,7 @@ class ModelController(AbstractModelController):
                         column_names[value.expression.name].update({"length": value.length})
 
         def collect_foreign_keys():
-            cls.foreign_keys = tuple(cls.__table__.foreign_keys)
+            cls.foreign_keys = tuple([instance.column.name for instance in cls.__table__.foreign_keys])
         check_class_attributes()
         collect_column_attributes() if not cls.column_names else None
         collect_foreign_keys()
