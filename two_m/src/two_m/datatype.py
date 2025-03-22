@@ -96,6 +96,12 @@ class LinkedList:
         Добавить ноду в нонец
         """
         new_element = self.LinkedListItem(*args, **kwargs)
+        if len(self) == 1:
+            last_elem = self._tail
+            last_elem.next = new_element
+            new_element.prev = last_elem
+            self._tail = new_element
+            return
         if self:
             last_elem = self._tail
             self.__set_next(last_elem, new_element)
@@ -167,34 +173,33 @@ class LinkedList:
     def __delitem__(self, index):  # O(n)
         index = self.__support_negative_index(index)
         self._is_valid_index(index)
-        if not index:
-            item = self.__forward_move(0)
-            next_item = None
-            if item is not None:
-                next_item = item.next
-                item.next = None
+        if index == self._tail.index:
+            current_item = self._tail
+            prev_item = current_item.prev() if current_item.prev is not None else None
+            current_item.prev = None
+            if prev_item is not None:
+                prev_item.next = None
+            if prev_item is None:
+                self._head = None
+            self._tail = prev_item
+            return current_item
+        if index == self._head.index:
+            current_item = self._head
+            next_item = current_item.next
+            self._head = next_item
             if next_item is None:
                 self._tail = None
-            else:
-                self.__decr_indexes(next_item)
-            self._head = next_item
-            return item
-        item_prev = self.__forward_move(index - 1)
-        if index == len(self) - 1:
-            if item_prev is not None:
-                item = item_prev.next
-                item_prev.next = None
-            else:
-                item = None
-            self._tail = item_prev
-            return item
-        current_item = item_prev.next
-        if current_item is None:
-            raise IndexError
+            self.__decr_indexes(next_item)
+            return current_item
+        current_item = self.__forward_move(index)
+        prev_item = current_item.prev() if current_item.prev is not None else None
         next_item = current_item.next
-        current_item.next = None
-        item_prev.next = next_item
-        self.__decr_indexes(current_item)
+        next_item.prev = prev_item
+        if prev_item is not None:
+            prev_item.next = next_item
+        else:
+            self._head = self._tail = next_item
+        self.__decr_indexes(next_item)
         return current_item
 
     def __iter__(self):
