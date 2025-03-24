@@ -806,11 +806,20 @@ class TestORMHelper(unittest.TestCase, SetUp):
         # Ставим в столбец отношения внешнего ключа значение, чьего PK не существует
         # тогда будет взята связка из базы данных! с прежним pk-fk
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
+        self.assertEqual(2, result.__len__())
         self.assertEqual(result.items[0]["Cnc"]["cncid"], 1, result.items[0]["Machine"]["cncid"])
         self.assertEqual(result.items[0]["Cnc"]["name"], "NC210")  # Из базы
         self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")  # Тоже из базы
-        self.orm_manager.set_item(Machine, machineid=1, cncid=2, _update=True)  # найдётся по столбцу machinename, потому что (unique constraint)
-        print(result.items)
+        self.orm_manager.set_item(Machine, machinename="Heller", cncid=2, _update=True)  # найдётся по столбцу machinename, потому что (unique constraint)
+        # Изначально было 2 связки, но так как 1 разрушили, то осталась всего одна
+        self.assertEqual(1, result.__len__())
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
+        self.assertEqual(result.items[0]["Cnc"]["name"], "Ram")
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)
+        # Восстановили связь, теперь снова 2 связки в результатах
+        self.assertEqual(2, result.__len__())
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
+        self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
 
     @drop_cache
     @db_reinit
