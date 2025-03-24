@@ -260,15 +260,8 @@ class NodeTools:
 class QueueSearchTools:
     """ Инструменты для поиска нод. Поиск идентичных [переданной] нод в указанном контейнере. """
     @classmethod
-    def get_node_by_unique_fields(cls: Union[Type["ORMItemQueue"], Type["SpecialOrmContainer"]], queue, right_node) -> \
-            Optional[Union["ORMItem", "SpecialOrmItem"]]:
-        """ Вернуть ноду, у которой есть совпадения по полям с unique=True.
-        Если в очереди найдены 2 ноды с совпадающими РАЗНЫМИ полями и значениями,
-         то обнулить найденную ноду"""
-        if cls is not ORMItemQueue and cls is not SpecialOrmContainer:
-            if cls is not QueueSearchTools:
-                raise TypeError(f"Данный класс предназначен для наследования в ORMItemQueue или SpecialOrmContainer, "
-                                f"вместо этого он в наследовании у - {cls.__name__}")
+    def get_node_by_unique_fields(cls, queue, right_node):
+        nodes = queue.__class__()
         cls.__is_valid(queue, right_node)
         unique_columns_at_cur_table = tuple(ModelTools.get_unique_columns(right_node))
         if not unique_columns_at_cur_table:
@@ -276,17 +269,13 @@ class QueueSearchTools:
         unique_columns_in_node = set(right_node.value) & set(unique_columns_at_cur_table)
         if not unique_columns_in_node:
             return
-        if cls is SpecialOrmContainer or cls is SpecialOrmContainer:
-            nodes = cls()
-        else:
-            nodes = queue.__class__()
         for left_node in queue:
             if not left_node.model.__name__ == right_node.model.__name__:
                 continue
             matched = set(left_node.value) & unique_columns_in_node
             for k in matched:
                 if right_node.value[k] == left_node.value[k]:
-                    nodes.enqueue(**left_node.get_attributes())
+                    nodes.enqueue(**left_node.get_attributes(new_container=nodes))
         if nodes:
             if len(nodes) > 1:
                 raise ORMException
@@ -549,6 +538,14 @@ class ORMItem(LinkedListItem, ModelTools, NodeTools):
 
     def __create_primary_key(self) -> dict[str, Union[str, int]]:
         """Повторный вызов недопустим. Вызывать в первую очередь! до добаления ноды в связанный список"""
+        def convert_join_select_result_type(input_: ResultORMCollection) -> ORMItemQueue:
+            result = ORMItemQueue()
+            NodeTypeConverter.input_cls = ResultORMItem
+            NodeTypeConverter.output_cls = ORMItem
+            for node in input_:
+                result.append(**NodeTypeConverter.convert(node).get_attributes(new_container=result,
+                                                                 with_update={"_create_at":  datetime.datetime.now()}))
+            return result
         name = self.get_primary_key_column_name(self.model)
         value = self._select_primary_key_value_from_scalars(self, name)
         if value:
@@ -564,8 +561,9 @@ class ORMItem(LinkedListItem, ModelTools, NodeTools):
                 return node.get_primary_key_and_value()
             multiple_items_from_cache = ORMHelper.cache.get(JoinSelectResult.RESULT_CACHE_KEY,
                                                             [ResultORMCollection()])
-            for group in multiple_items_from_cache:
-                node = QueueSearchTools.get_node_by_unique_fields(group, self)
+            for collection in multiple_items_from_cache:
+                converted = convert_join_select_result_type(collection)
+                node = QueueSearchTools.get_node_by_unique_fields(converted, self)
                 if node:
                     break
             if node:
@@ -775,8 +773,26 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
 
     def enqueue(self, **attrs):
         """ Установка ноды в конец очереди с хитрой логикой проверки на совпадение. """
+        def remove_other_foreign_key_value():
+            """ Если в очереди есть нода, той же модели, что и добавляемая.
+             Если у старой и добавляемой ноды есть одно и то же значение внешнего ключа,
+             то из найденной в очереди ноды это значение нужно убрать"""
+            for node in self:
+                if not new_item.model.__name__ == node.model.__name__:
+                    continue
+                all_foreign_key_columns = frozenset(ModelTools.get_foreign_key_columns(node.model))
+                current_fk_values = frozenset(node.value) & all_foreign_key_columns & frozenset(new_item.value)
+                for fk_name in current_fk_values:
+                    if node.value[fk_name] == new_item.value[fk_name]:
+                        new_values = node.get_attributes()
+                        del new_values[fk_name]
+                        self._remove_from_queue(node)
+                        self.append(**new_values)
+                        break
+
         exists_item, new_item = self._replication(**attrs)
         self._remove_from_queue(exists_item) if exists_item else None
+        remove_other_foreign_key_value()
         self.append(**new_item.get_attributes())
 
     def dequeue(self) -> Optional[ORMItem]:
@@ -814,15 +830,13 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
         container = self.__class__()
         for related_node in root:  # O(n) * O(j) * O(m) * O(n) * O(1) = O(n)
             if not related_node == main_node:  # O(g) * O(j) = O (j)
-                for fk_field_data in ModelTools.get_foreign_key_columns(main_node.model):  # O(i)
-                    table_name, column_name = fk_field_data["table_name"], fk_field_data["column_name"]
-                    if table_name == related_node.model.__tablename__:
+                for column_name in ModelTools.get_foreign_key_columns(main_node.model):  # O(i)
+                    if main_node.model.__name__ == related_node.model.__tablename__:
                         pk_field, pk_value = related_node.get_primary_key_and_value(as_tuple=True)
                         if pk_field == column_name:
                             main_node_fk_column_name = get_column_name(main_node.value, pk_value)
                             if main_node_fk_column_name is not None:
-                                if main_node.value[main_node_fk_column_name] == related_node.value[column_name]:
-                                    container.append(**related_node.get_attributes())  # O(1)
+                                container.append(**related_node.get_attributes())  # O(1)
         return container
 
     def search_nodes(self, model: Type[CustomModel], negative_selection=False,
@@ -1671,6 +1685,31 @@ class SpecialOrmContainer(ORMItemQueue):
         raise DoesNotExists
 
 
+class NodeTypeConverter:
+    TYPES = (ORMItem, ResultORMItem, SpecialOrmItem,)
+    input_cls = None
+    output_cls = None
+
+    @classmethod
+    def convert(cls, node):
+        cls.__is_valid_configuration()
+        if cls.input_cls is ResultORMItem and cls.output_cls is ORMItem:
+            return cls._result_orm_item_to_orm_item_queue(node)
+
+    @staticmethod
+    def _result_orm_item_to_orm_item_queue(node: ResultORMItem):
+        values = node.value
+        del values["ui_hidden"]
+        return ORMItem(_model=node.model, _update=True, **values, _container=ORMItemQueue())
+
+    @classmethod
+    def __is_valid_configuration(cls):
+        if all(map(lambda type_: cls.input_cls is not type_, cls.TYPES)):
+            raise TypeError
+        if all(map(lambda type_: cls.output_cls is not type_, cls.TYPES)):
+            raise TypeError
+
+
 class ORMHelper(ORMAttributes):
     """
     Адаптер для ORMItemQueue
@@ -2499,6 +2538,14 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
         return False
 
     def _merge(self) -> tuple[ResultORMCollection]:
+        """
+        0) Есть 2 двумерные коллекции: ноды_из_кэша и ноды_из_базы
+        Например: [ Container(node, node, node), Container(node, node) ]
+        1) Собираем все ноды из локальных, у которых есть значение любого FK столбца
+        2) Обходим все ноды из базы, если значение столбца ноды из базы совпадает с нодой из локалки,
+        то эту ноду УДАЛЯЕМ ИЗ НОД ИЗ БАЗЫ. Если длина этой группы нод <=1, то мы эту группу удаляем целиком
+        3) На фильтрованные ноды из базы накладываем ноды из кеша, оставшиеся добавляем в хвост
+        """
         def get_local_nodes_with_any_value_in_fk(local_nodes: list[SpecialOrmContainer]):
             """ Все локальные ноды, смешанные в кучу, в которых, в значениях внешних ключей, стоит какое-то значение """
             def collect_foreign_keys_at_local_items():
@@ -2508,7 +2555,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                         if foreign_keys:
                             yield node.model.__name__, foreign_keys
             res = SpecialOrmContainer()
-            foreign_keys_at_local_items = collect_foreign_keys_at_local_items()
+            foreign_keys_at_local_items = tuple(collect_foreign_keys_at_local_items())
             for group in local_nodes:
                 tables_map = {node.model.__name__: node.model for node in group}
                 for table_name, foreign_keys in foreign_keys_at_local_items:
@@ -2519,48 +2566,64 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
 
         def get_filtered_database_items():
             """ Оборвать связи между нодами из БД, если эта связь оборвана в локальных нодах """
+            currently_added_hash = []
             nodes_with_foreign_keys_at_local_items = get_local_nodes_with_any_value_in_fk(local_items)
             for db_nodes_group in self.get_nodes_from_database() if not self._only_queue else []:
                 for local_node_with_fk in nodes_with_foreign_keys_at_local_items:
-                    result = db_nodes_group.get_node(local_node_with_fk.model,
-                                                     **local_node_with_fk.get_primary_key_and_value())
+                    result: SpecialOrmItem = db_nodes_group.get_node(local_node_with_fk.model,
+                                                                     **local_node_with_fk.get_primary_key_and_value())
                     if not result:
-                        yield db_nodes_group
+                        if db_nodes_group.hash_by_pk not in currently_added_hash:
+                            if len(db_nodes_group) == 1:
+                                continue
+                            yield db_nodes_group
+                            currently_added_hash.append(db_nodes_group.hash_by_pk)
                         continue
-                    for foreign_key_column in ModelTools.get_foreign_key_columns(local_node_with_fk):
+                    for foreign_key_column in ModelTools.get_foreign_key_columns(local_node_with_fk.model):
                         if foreign_key_column not in result.value:
                             break
                         if not result.value[foreign_key_column] == local_node_with_fk.value[foreign_key_column]:
                             db_nodes_group.remove(result.model, *result.get_primary_key_and_value(as_tuple=True))
                 if len(db_nodes_group) > 1:
-                    yield db_nodes_group
+                    if db_nodes_group.hash_by_pk not in currently_added_hash:
+                        yield db_nodes_group
+                        currently_added_hash.append(db_nodes_group.hash_by_pk)
 
         def merge(db_items, local_items_):
-            for db_group in db_items:  # O(n)
-                nodes = db_group.__iter__()  # O(n1)
-                while nodes:  # O(n1)
+            """
+            :param db_items: Коллекция из базы данных
+            :param local_items_:Коллекция из локальных элементов очереди на коммит в базу
+            """
+            for db_group in db_items:
+                nodes = db_group.__iter__()
+                while nodes:
                     try:
-                        rand_node = nodes.__next__()  # O(1)
+                        rand_node = nodes.__next__()
                     except StopIteration:
                         rand_node = None
                     if rand_node is None:
                         break
-                    for local_group in local_items_:  # O(k)
-                        find_node = local_group.search_nodes(rand_node.model, **rand_node.get_primary_key_and_value())  # O(k1)
-                        if find_node:  # O(k1)
-                            yield db_group + local_group  # O(n1) * O(k1)
+                    for local_group in local_items_:
+                        find_node = local_group.search_nodes(rand_node.model, **rand_node.get_primary_key_and_value())
+                        if find_node:
                             db_items.remove(db_group)
                             local_items_.remove(local_group)
+                            if len(db_group) <= 1:
+                                if len(local_group) > 1:
+                                    yield local_group
+                                continue
+                            yield db_group + local_group
                             break
-            if db_items:
-                for item in db_items:
-                    yield item
-            if local_items_:
-                for item in local_items_:
-                    yield item
-            # f(n) = O(n) * (O(1) + O(n1) + O(n1) * (O(1) + O(1) + O(k) * (O(k1) + O(k1) + O(n1) * O(k1) + O(k1))))
-            # f(n) = O(n) * (O(n1) + O(n1) * (O(k) * (O(k1) + O(k1) + O(n1) * O(k1) + O(k1))))
-            # f(n) = O(n) * (O(n1) * (O(k) * (O(k1) * O(k1))))
+            for nodes_group in db_items:
+                if len(nodes_group) <= 1:
+                    db_items.remove(nodes_group)
+            for nodes_group in local_items_:
+                if len(nodes_group) <= 1:
+                    local_items_.remove(nodes_group)
+            for item in db_items:
+                yield item
+            for item in local_items_:
+                yield item
         local_items = list(self.get_local_nodes()) if not self._only_db else []
         return tuple(ResultORMCollection(item) for item in merge(list(get_filtered_database_items()), local_items))
 
@@ -2671,6 +2734,10 @@ class Pointer(PointerCacheTools):
             return
         self._set_pointer_configuration(self.__create_cache_data(items=nodes))
         return dict(zip(self._wrap_items, nodes))
+
+    @property
+    def is_valid(self):
+        return self._is_valid()
 
     def has_changes(self, name: str) -> Optional[Union[bool, Type[Exception]]]:
         """ Получить статус состояния результатов, на которые ранее был задан экземпляр Pointer.
