@@ -61,6 +61,11 @@ class SetUp:
     orm_manager: Optional[ORM] = None
 
     def set_data_into_database(self):
+        """
+        1) Cnc NC210 id1 - Machine Heller machineid1
+
+        :return:
+        """
         self.orm_manager.database.add(Cnc(name="NC210", commentsymbol=","))
         self.orm_manager.database.add(Numeration(numerationid=3))
         self.orm_manager.database.add(Comment(findstr="test_str", iffullmatch=True))
@@ -75,9 +80,14 @@ class SetUp:
         ))
         self.orm_manager.database.add(OperationDelegation(commentid=self.orm_manager.database.scalar(select(Comment)).commentid))
         self.orm_manager.database.commit()
-        time.sleep(1)
 
     def set_data_into_queue(self):
+        """
+        1) Cnc id1 Newcnc Tesm id1
+        2) Cnc id2 Ram Machine id2 Fidia
+        3) Machine 65a90 id3
+        4) Machine Rambaudi id4
+        """
         self.orm_manager.set_item(_model=Numeration, numerationid=2, endat=269, _insert=True)
         self.orm_manager.set_item(_insert=True, _model=OperationDelegation, numerationid=2, operationdescription="Нумерация кадров")
         self.orm_manager.set_item(_model=Comment, findstr="test_string_set_from_queue", ifcontains=True, _insert=True, commentid=2)
@@ -523,7 +533,6 @@ class TestORMHelper(unittest.TestCase, SetUp):
 
     def test_cache(self):
         self.orm_manager.cache.set("1", 1)
-        time.sleep(3)
         value = self.orm_manager.cache.get("1")
         self.assertEqual(value, 1, msg="Результирующее значение, полученное из кеша отличается от заданного в тесте")
 
@@ -607,7 +616,6 @@ class TestORMHelper(unittest.TestCase, SetUp):
         self.orm_manager.set_item(_delete=True, machinename="Some_name", _model=Machine, inputcatalog=r"D:\Test",
                                   outputcatalog=r"C:\anef")
         self.orm_manager.set_item(_delete=True, machinename="Some_name_2", _model=Machine)
-        time.sleep(3)
         result = self.orm_manager.get_items(_model=Machine, machinename="Helller", _db_only=True)
         self.assertTrue(result)
         # start Invalid ...
@@ -717,7 +725,7 @@ class TestORMHelper(unittest.TestCase, SetUp):
         self.assertIn("machineid", local_data.items[0]["Machine"])
         self.assertIn("machineid", database_data.items[0]["Machine"])
         self.assertNotEqual(local_data.items[0]["Machine"]["machinename"], database_data.items[0]["Machine"]["machinename"])
-        self.assertEqual("Tesm", local_data.items[0]["Machine"]["machinename"])
+        self.assertEqual("Tesm", local_data.items[1]["Machine"]["machinename"])
         self.assertEqual("Ram", local_data.items[0]["Cnc"]["name"])
         self.assertNotEqual(local_data.items[0]["Cnc"]["name"], database_data.items[0]["Cnc"]["name"])
         #
@@ -787,6 +795,22 @@ class TestORMHelper(unittest.TestCase, SetUp):
                           _on={2.9: 5})
         self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
                           _on={4: "Machine.machinename"})
+
+    @drop_cache
+    @db_reinit
+    def test_join_select_merge(self):
+        self.set_data_into_database()
+        self.set_data_into_queue()
+        result = self.orm_manager.join_select(Machine, Cnc, _on={"Machine.cncid": "Cnc.cncid"})
+        # Провокационный момент:
+        # Ставим в столбец отношения внешнего ключа значение, чьего PK не существует
+        # тогда будет взята связка из базы данных! с прежним pk-fk
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
+        self.assertEqual(result.items[0]["Cnc"]["cncid"], 1, result.items[0]["Machine"]["cncid"])
+        self.assertEqual(result.items[0]["Cnc"]["name"], "NC210")  # Из базы
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")  # Тоже из базы
+        self.orm_manager.set_item(Machine, machineid=1, cncid=2, _update=True)  # найдётся по столбцу machinename, потому что (unique constraint)
+        print(result.items)
 
     @drop_cache
     @db_reinit
@@ -999,10 +1023,10 @@ class TestResultPointer(unittest.TestCase, SetUp):
         self.assertRaises(KeyError, result.pointer.has_changes, "Другой не установленный во wrapper элемент")
         self.assertFalse(result.pointer.has_changes("Результат в списке 1"))
         # Нарушить связь PK - FK
-        print(result.pointer.items)
-        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=8, _update=True)
-        print("SET VAL") # Теперь он взял те, что были связаны pk-fk в БД!!!!! Такого быть не должно
-        print(result.pointer.items)
+        print(result.pointer.items['Результат в списке 1'])
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
+        print(result.pointer.is_valid)
+        print(result.pointer.items['Результат в списке 1'])
 
 
 """  not supported - ver 1.
