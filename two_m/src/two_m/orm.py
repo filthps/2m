@@ -1041,7 +1041,7 @@ class ResultORMCollection:
     """ Иммутабельная коллекция с набором результата, закрытая на добавление новых элементов """
     ADD_TABLE_NAME_PREFIX: Literal["auto", "add", "no-prefix"] = "auto"
 
-    def __init__(self, collection: Type[LinkedList] = None, prefix_mode=None):
+    def __init__(self, collection: "SpecialOrmContainer" = None, prefix_mode=None):
         def is_valid():
             if not issubclass(type(self.__collection), LinkedList):
                 raise TypeError
@@ -1077,12 +1077,12 @@ class ResultORMCollection:
         return new_items
 
     @property
-    def container_cls(self):
-        return type(self.__collection)
-
-    @property
     def hash_by_pk(self):
         return sum(map(lambda x: x.hash_by_pk, self.__collection))
+
+    @property
+    def container_cls(self):
+        return type(self.__collection)
 
     def add_model_name_prefix(self):
         """ Изменит всю коллекцию, добавив префиксы названия таблицы к каждому значению полей у каждой ноды """
@@ -1132,11 +1132,11 @@ class ResultORMCollection:
                     continue
                 node.add_model_name_prefix(tuple(names_to_set_prefix))
 
-    def get_node(self, *args, **kwargs):
-        return self.__collection.get_node(*args, **kwargs)
+    def get_node(self, model, primary_key, value):
+        return self.__collection.get_node(model, **{primary_key: value})
 
-    def search_nones(self, *args, **kwargs):
-        return self.__collection.search_nodes(*args, **kwargs)
+    def search_nones(self, model, **kwargs):
+        return self.__collection.search_nodes(model, **kwargs)
 
     def all_nodes(self) -> Iterator:
         """ Для служебного пользования. Для UI использовать iter """
@@ -1157,7 +1157,16 @@ class ResultORMCollection:
         return sum(map(lambda _: 1, self))
 
     def __getitem__(self, item) -> ResultORMItem:
-        return self.__collection.__getitem__(item)
+        if not isinstance(item, (str, int)):
+            raise TypeError
+        if type(item) is int:
+            if len(str(item)) > 3:
+                for result in self:
+                    if result.hash_by_pk == item:
+                        return result
+                    if result.__hash__() == item:
+                        return result
+        return self.__collection.__getitem__(item)  # По имени таблицы, по индексу
 
     def __hash__(self):
         return hash(self.__collection)
@@ -1176,8 +1185,7 @@ class ResultORMCollection:
         new_collection.LinkedListItem = ResultORMItem
         [new_collection.append(node.model, node.get_primary_key_and_value(),
                                **({"ui_hidden": True
-                                  if node.type == "_delete" else False}
-                                  if hasattr(node, "type") else {}),
+                                  if node.type == "_delete" else False}),
                                **node.value)
          for node in collection]
         return new_collection
