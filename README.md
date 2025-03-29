@@ -111,11 +111,14 @@
 <code>"совпадающий" in *any_result*.**pointer**  # True</code>
 <br>
 <br>
+
 - <code>any_result.pointer.**has_changes(name: str)**</code> -> Optional[bool] - Передаём сюда полную хеш сумму и получаем ответ на вопрос: есть ли какие-нибудь изменения (с момента последнего вопрошания или инициализации).<br>
 Если переданного значения не было в списке при инициализации, вернёт *None*.
 <br>
+
 <code>*any_result.pointer*.**is_valid()**</code> -> bool. Узнать о текущем состоянии текущего экземпляра *Pointer*: закрылся он или нет.
 <br>
+
 - <code>any_result.pointer.**wrap_items**</code> -> tuple. Исходный кортеж строк. Если данный *Pointer* закрыт, кортеж будет пустым.
 - <code>any_result.pointer.**items**</code> -> Полный словарь содержимого в виде: <br><code>{"одна_из_строк_wrap": контейнер_с_содержимым}</code>
 ### Инвалидация
