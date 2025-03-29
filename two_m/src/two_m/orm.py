@@ -43,8 +43,8 @@ from two_m.src.two_m.exceptions import *
 
 class ORMAttributes:
     @classmethod
-    def is_valid_node(cls, node: Union["ORMItem", "SpecialOrmItem", "ResultORMItem"]):
-        if not isinstance(node, (SpecialOrmItem, ORMItem, ResultORMItem,)):
+    def is_valid_node(cls, node: Union["QueueItem", "ServiceOrmItem", "ResultORMItem"]):
+        if not isinstance(node, (ServiceOrmItem, QueueItem, ResultORMItem,)):
             raise TypeError
         cls.is_valid_model_instance(node.model)
 
@@ -164,7 +164,7 @@ class ModelTools(ORMAttributes):
         return model_instance
 
     @classmethod
-    def _select_primary_key_value_from_scalars(cls, node: "ORMItem", field_name: str) -> Optional[Union[str, int]]:
+    def _select_primary_key_value_from_scalars(cls, node: "QueueItem", field_name: str) -> Optional[Union[str, int]]:
         """ Выбрать значние из значений ноды,
         если primary_key=True установлено для строки или другого поля со скалярными значениями"""
         try:
@@ -201,7 +201,7 @@ class ModelTools(ORMAttributes):
         return True
 
     @staticmethod
-    def _check_not_null_fields_in_node_value(node: "ORMItem") -> bool:
+    def _check_not_null_fields_in_node_value(node: "QueueItem") -> bool:
         """ Проверить все поля на предмет nullable """
         model_attributes: dict[dict] = node.model().column_names
         for k, attributes in model_attributes.items():
@@ -213,7 +213,7 @@ class ModelTools(ORMAttributes):
         return True
 
     @staticmethod
-    def _is_valid_column_type_in_sql_type(node: "ORMItem") -> bool:
+    def _is_valid_column_type_in_sql_type(node: "QueueItem") -> bool:
         """ Проверить соответствие данных в ноде на предмет типизации.
          Если тип данных отличается от табличного в БД, то возбудить исключение"""
         data = node.model().column_names
@@ -229,14 +229,14 @@ class ModelTools(ORMAttributes):
         return True
 
     @classmethod
-    def _create_select_in_database_and_put_primary_key_by_any_unique_field(cls, node: "ORMItem") -> Optional[dict]:
+    def _create_select_in_database_and_put_primary_key_by_any_unique_field(cls, node: "QueueItem") -> Optional[dict]:
         """ Произвести запрос в базу данных для поиска записи со столбцами unique constraint,
         для получения первчиного ключа и значения (из базы) """
         unique_columns = tuple(cls.get_unique_columns(node))
         if not unique_columns:
             return
         unique_data = {key: node.value[key] for key in node.value if key in unique_columns}
-        select_result = ORMHelper.database.query(node.model).filter_by(**unique_data).all()
+        select_result = Main.database.query(node.model).filter_by(**unique_data).all()
         if not select_result:
             return
         pk = cls.get_primary_key_column_name(node.model)
@@ -284,12 +284,12 @@ class QueueSearchTools:
     @staticmethod
     def __is_valid(queue, node):
         ORMAttributes.is_valid_model_instance(node.model)
-        if not isinstance(queue, (ORMItemQueue, SpecialOrmContainer, ResultORMCollection,)):
+        if not isinstance(queue, (Queue, ServiceOrmContainer, ResultORMCollection,)):
             raise TypeError
 
 
-class ORMItem(LinkedListItem, ModelTools, NodeTools):
-    """ Иммутабельный класс ноды для ORMItemQueue. Нода для иньекции в базу. """
+class QueueItem(LinkedListItem, ModelTools, NodeTools):
+    """ Иммутабельный класс ноды для Queue. Нода для иньекции в базу. """
     def __init__(self, _primary_key_from_ui=None, _container=None, _insert=False, _update=False, _delete=False,
                  _model=None, _where=None, _create_at=None,
                  **kw):
@@ -303,7 +303,7 @@ class ORMItem(LinkedListItem, ModelTools, NodeTools):
             Все остальные параметры являются парами 'поле-значение'
             """
         self._is_valid_container(_container)
-        self._container: ReferenceType[Union["ORMItemQueue", "SpecialOrmContainer"]] = ref(_container)
+        self._container: ReferenceType[Union["Queue", "ServiceOrmContainer"]] = ref(_container)
         self.__model: CustomModel = _model
         self.is_valid_model_instance(self.__model)
         if _primary_key_from_ui:
@@ -324,7 +324,7 @@ class ORMItem(LinkedListItem, ModelTools, NodeTools):
             if not isinstance(self.__insert, bool) or not isinstance(self.__update, bool) or \
                     not isinstance(self.__delete, bool):
                 raise TypeError
-            if sum((self.__insert, self.__update, self.__delete,)) != 1:
+            if not sum((self.__insert, self.__update, self.__delete,)) == 1:
                 raise NodeDMLTypeError
         is_valid_dml_type()
         self._field_names_validation()
@@ -351,12 +351,12 @@ class ORMItem(LinkedListItem, ModelTools, NodeTools):
         return self.__relative_primary_key
 
     @property
-    def container(self) -> "ORMItemQueue":
+    def container(self) -> "Queue":
         return self._container()
 
     @container.setter
     def container(self, cnt):
-        if type(cnt) is not ORMItemQueue:
+        if type(cnt) is not Queue:
             raise TypeError
         self._container = ref(cnt)
 
@@ -413,7 +413,7 @@ class ORMItem(LinkedListItem, ModelTools, NodeTools):
     def type(self) -> str:
         return "_insert" if self.__insert else "_update" if self.__update else "_delete"
 
-    def get_attributes(self, with_update: Optional[dict] = None, new_container: Optional["ORMItemQueue"] = None) -> dict:
+    def get_attributes(self, with_update: Optional[dict] = None, new_container: Optional["Queue"] = None) -> dict:
         if with_update is not None and type(with_update) is not dict:
             raise TypeError
         if new_container:
@@ -450,7 +450,7 @@ class ORMItem(LinkedListItem, ModelTools, NodeTools):
         if self.__insert:
             query = insert(self.model).values(**value)
         if self.__update or self.__delete:
-            query = ORMHelper.database.query(self.model).filter_by(**where).first()
+            query = Main.database.query(self.model).filter_by(**where).first()
             if query is not None:
                 if self.__update:
                     [setattr(query, key, value) for key, value in value.items()]
@@ -464,7 +464,7 @@ class ORMItem(LinkedListItem, ModelTools, NodeTools):
     def __len__(self):
         return len(self._val)
 
-    def __eq__(self, other: "ORMItem"):
+    def __eq__(self, other: "QueueItem"):
         if type(other) is not type(self):
             return False
         return self.__hash__() == hash(other)
@@ -532,16 +532,16 @@ class ORMItem(LinkedListItem, ModelTools, NodeTools):
 
     @staticmethod
     def _is_valid_container(container):
-        if type(container) is not ORMItemQueue:
-            raise TypeError(f"Вмето контейнера класса ORMItemQueue, который предназначен под ноды этого типа, "
+        if type(container) is not Queue:
+            raise TypeError(f"Вмето контейнера класса Queue, который предназначен под ноды этого типа, "
                             f"задан контейнер - {type(container).__name__}")
 
     def __create_primary_key(self) -> dict[str, Union[str, int]]:
         """Повторный вызов недопустим. Вызывать в первую очередь! до добаления ноды в связанный список"""
-        def convert_join_select_result_type(input_: ResultORMCollection) -> ORMItemQueue:
-            result = ORMItemQueue()
+        def convert_join_select_result_type(input_: ResultORMCollection) -> Queue:
+            result = Queue()
             NodeTypeConverter.input_cls = ResultORMItem
-            NodeTypeConverter.output_cls = ORMItem
+            NodeTypeConverter.output_cls = QueueItem
             for node in input_:
                 result.append(**NodeTypeConverter.convert(node).get_attributes(new_container=result,
                                                                  with_update={"_create_at":  datetime.datetime.now()}))
@@ -554,12 +554,12 @@ class ORMItem(LinkedListItem, ModelTools, NodeTools):
             node = QueueSearchTools.get_node_by_unique_fields(self.container, self)
             if node is not None:
                 return node.get_primary_key_and_value()
-            single_items_from_cache = ORMHelper.cache.get(Result.RESULT_CACHE_KEY,
+            single_items_from_cache = Main.cache.get(Result.RESULT_CACHE_KEY,
                                                           ResultORMCollection())
             node = QueueSearchTools.get_node_by_unique_fields(single_items_from_cache, self)
             if node is not None:
                 return node.get_primary_key_and_value()
-            multiple_items_from_cache = ORMHelper.cache.get(JoinSelectResult.RESULT_CACHE_KEY,
+            multiple_items_from_cache = Main.cache.get(JoinSelectResult.RESULT_CACHE_KEY,
                                                             [ResultORMCollection()])
             for collection in multiple_items_from_cache:
                 converted = convert_join_select_result_type(collection)
@@ -756,14 +756,14 @@ class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
             raise ValueError
 
 
-class ORMItemQueue(LinkedList, QueueSearchTools):
+class Queue(LinkedList, QueueSearchTools):
     """
     Очередь на основе связанного списка.
-    Управляется через адаптер ORMHelper.
+    Управляется через адаптер Main.
     Класс-контейнер умеет только ставить в очередь ((enqueue) зашита особая логика) и снимать с очереди (dequeue)
     см логику в методе _replication.
     """
-    LinkedListItem = ORMItem
+    LinkedListItem = QueueItem
 
     def __init__(self, items: Optional[Iterable[dict]] = None):
         super().__init__(items)
@@ -795,7 +795,7 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
         remove_other_foreign_key_value()
         self.append(**new_item.get_attributes())
 
-    def dequeue(self) -> Optional[ORMItem]:
+    def dequeue(self) -> Optional[QueueItem]:
         """ Извлечение ноды с начала очереди """
         left_node = self._head
         if left_node is None:
@@ -814,7 +814,7 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
                  by_create_time: bool = False, decr: bool = False):
         super().order_by(model, by_column_name, by_primary_key, by_create_time, decr)
 
-    def get_related_nodes(self, main_node: ORMItem, other_container=None) -> "ORMItemQueue":
+    def get_related_nodes(self, main_node: QueueItem, other_container=None) -> "Queue":
         """ Получить все связанные (внешним ключом) с передаваемой нодой ноды.
         O(i) * O(1) + O(n) = O(n)"""
         def get_column_name(data: dict, value) -> Optional[str]:
@@ -840,7 +840,7 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
         return container
 
     def search_nodes(self, model: Type[CustomModel], negative_selection=False,
-                     **_filter: dict[str, Union[str, int, Literal["*"]]]) -> "ORMItemQueue":  # O(n)
+                     **_filter: dict[str, Union[str, int, Literal["*"]]]) -> "Queue":  # O(n)
         """
         Искать ноды по совпадениям любых полей.
         :arg model: кастомный объект, смотри модуль database/models
@@ -848,12 +848,12 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
         который будет засчитывать любые значения у полей.
         :arg negative_selection: режим отбора нод (найти ноды КРОМЕ ... [filter])
         """
-        ORMItem.is_valid_model_instance(model)
+        QueueItem.is_valid_model_instance(model)
         items = self.__class__()
         nodes = iter(self)
         while nodes:
             try:
-                left_node: ORMItem = next(nodes)
+                left_node: QueueItem = next(nodes)
             except StopIteration:
                 return items
             if left_node.model.__name__ == model.__name__:  # O(u * k)
@@ -879,19 +879,19 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
                                 break
         return items
 
-    def get_node(self, model: CustomModel, **primary_key_data) -> Optional[ORMItem]:
+    def get_node(self, model: CustomModel, **primary_key_data) -> Optional[QueueItem]:
         """
         Данный метод используется при инициализации - _replication
         :arg model: объект модели
         :arg primary_key_data: словарь вида - {имя_первичного_ключа: значение}
         """
-        ORMItem.is_valid_model_instance(model)
-        if len(primary_key_data) != 1:
+        QueueItem.is_valid_model_instance(model)
+        if not len(primary_key_data) == 1:
             raise NodePrimaryKeyError
         nodes = iter(self)
         while nodes:
             try:
-                left_node: Optional[ORMItem] = next(nodes)
+                left_node: Optional[QueueItem] = next(nodes)
             except StopIteration:
                 break
             if left_node.model.__name__ == model.__name__:  # O(k) * O(x)
@@ -904,15 +904,15 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
     def __str__(self):
         return "\n".join(tuple(str(m) for m in self))
 
-    def __contains__(self, item: ORMItem) -> bool:
-        if type(item) is not ORMItem:
+    def __contains__(self, item: QueueItem) -> bool:
+        if type(item) is not QueueItem:
             return False
         for node in self:
             if hash(node) == item.__hash__():
                 return True
         return False
 
-    def __add__(self, other: "ORMItemQueue"):
+    def __add__(self, other: "Queue"):
         if not type(other) is self.__class__:
             raise TypeError
         result_instance = self.__class__()
@@ -923,19 +923,19 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
     def __iadd__(self, other):
         if not isinstance(other, type(self)):
             raise TypeError
-        result: ORMItemQueue = self + other
+        result: Queue = self + other
         self._head = result.head
         self._tail = result.tail
         return result
 
-    def __sub__(self, other: "ORMItemQueue"):
+    def __sub__(self, other: "Queue"):
         if not isinstance(other, self.__class__):
             raise TypeError
         result_instance = copy.deepcopy(self)
         [result_instance.remove(n.model, *n.get_primary_key_and_value(as_tuple=True)) for n in other]
         return result_instance
 
-    def __and__(self, other: "ORMItemQueue"):
+    def __and__(self, other: "Queue"):
         if type(other) is not self.__class__:
             raise TypeError
         output = self.__class__()
@@ -949,14 +949,14 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
             return False
-        if len(self) != len(other):
+        if not len(self) == len(other):
             return False
         return hash(self) == hash(other)
 
     def __hash__(self):
         return sum(map(hash, self))
 
-    def _replication(self, **new_node_complete_data: dict) -> tuple[Optional[ORMItem], ORMItem]:  # O(l * k) + O(n) + O(1) = O(n)
+    def _replication(self, **new_node_complete_data: dict) -> tuple[Optional[QueueItem], QueueItem]:  # O(l * k) + O(n) + O(1) = O(n)
         """
         Создавать ноды для добавления можно только здесь! Логика для постаовки в очередь здесь.
         1) Инициализация ноды: первичного ключа (согласно атрибутам класса модели), данных в ней и др
@@ -966,16 +966,16 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
         3) Получаем список столбцов модели с unique=True
         Если столбца нету заменяем ноду в очерени новой, смешивая value, если найдена, return
         """
-        if type(self) is ORMItemQueue:
-            if self.LinkedListItem is not ORMItem:
-                raise TypeError("Метод _replication, как и класс ORMItemQueue предназначен для нод типа ORMItem")
-        if type(self) is SpecialOrmContainer:
-            if self.LinkedListItem is not SpecialOrmItem:
-                raise TypeError("Метод _replication, как и класс SpecialOrmContainer предназначен для нод типа SpecialOrmItem")
+        if type(self) is Queue:
+            if self.LinkedListItem is not QueueItem:
+                raise TypeError("Метод _replication, как и класс Queue предназначен для нод типа QueueItem")
+        if type(self) is ServiceOrmContainer:
+            if self.LinkedListItem is not ServiceOrmItem:
+                raise TypeError("Метод _replication, как и класс ServiceOrmContainer предназначен для нод типа ServiceOrmItem")
         potential_new_item = self.LinkedListItem(**new_node_complete_data)  # O(1)
         new_item = None
 
-        def merge(old_node: ORMItem, new_node: ORMItem, dml_type: str) -> ORMItem:
+        def merge(old_node: QueueItem, new_node: QueueItem, dml_type: str) -> QueueItem:
             new_node_data = old_node.get_attributes()
             old_where, new_where = old_node.where, new_node.where
             old_where.update(new_where)
@@ -994,7 +994,7 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
                     new_node_data.update({"_primary_key_from_ui": old_node.get_primary_key_and_value()})
             return self.LinkedListItem(**new_node_data)
 
-        def add_pk_from_old_node_in_new_node(old_node: "ORMItem", new_node: "ORMItem") -> "ORMItem":
+        def add_pk_from_old_node_in_new_node(old_node: "QueueItem", new_node: "QueueItem") -> "QueueItem":
             if not old_node:
                 return new_node
             if not new_node.is_relative_primary_key:
@@ -1031,7 +1031,7 @@ class ORMItemQueue(LinkedList, QueueSearchTools):
                 new_item = add_pk_from_old_node_in_new_node(exists_item, potential_new_item)
         return exists_item, new_item
 
-    def _remove_from_queue(self, left_node: ORMItem) -> None:
+    def _remove_from_queue(self, left_node: QueueItem) -> None:
         if type(left_node) is not self.LinkedListItem:
             raise TypeError
         del self[left_node.index]
@@ -1041,7 +1041,7 @@ class ResultORMCollection:
     """ Иммутабельная коллекция с набором результата, закрытая на добавление новых элементов """
     ADD_TABLE_NAME_PREFIX: Literal["auto", "add", "no-prefix"] = "auto"
 
-    def __init__(self, collection: "SpecialOrmContainer" = None, prefix_mode=None):
+    def __init__(self, collection: "ServiceOrmContainer" = None, prefix_mode=None):
         def is_valid():
             if not issubclass(type(self.__collection), LinkedList):
                 raise TypeError
@@ -1052,7 +1052,7 @@ class ResultORMCollection:
         self.__collection = collection
         self._prefix_mode = prefix_mode if prefix_mode is not None else self.ADD_TABLE_NAME_PREFIX
         if collection is None:
-            self.__collection = SpecialOrmContainer()
+            self.__collection = ServiceOrmContainer()
         is_valid()
         self.__collection = self.__convert_node_data(self.__collection)
         self.remove_model_prefix()
@@ -1087,7 +1087,7 @@ class ResultORMCollection:
     def add_model_name_prefix(self):
         """ Изменит всю коллекцию, добавив префиксы названия таблицы к каждому значению полей у каждой ноды """
         self._prefix_mode = "add"
-        new_collection = SpecialOrmContainer()
+        new_collection = ServiceOrmContainer()
         new_collection.LinkedListItem = ResultORMItem
         i = iter(self)
         while True:
@@ -1104,7 +1104,7 @@ class ResultORMCollection:
     def remove_model_prefix(self):
         """ Изменит всю коллекцию, удалив префиксы названия таблицы к каждому значению полей у каждой ноды """
         self._prefix_mode = "no-prefix"
-        new_collection = SpecialOrmContainer()
+        new_collection = ServiceOrmContainer()
         new_collection.LinkedListItem = ResultORMItem
         i = iter(self)
         while True:
@@ -1180,8 +1180,8 @@ class ResultORMCollection:
     @staticmethod
     def __convert_node_data(collection):
         """ В экземпляр поступает любой объект, производный от LinkedList.
-         Конвертировать его в SpecialOrmContainer для инкапсуляции в текущий экземпляр. """
-        new_collection = SpecialOrmContainer()
+         Конвертировать его в ServiceOrmContainer для инкапсуляции в текущий экземпляр. """
+        new_collection = ServiceOrmContainer()
         new_collection.LinkedListItem = ResultORMItem
         [new_collection.append(node.model, node.get_primary_key_and_value(),
                                **({"ui_hidden": True
@@ -1287,7 +1287,7 @@ class LettersSortNodesChain(Sort):
             return c
 
         def get_new_positions_for_groups(mapping):
-            def get_node_index_in_mapping(node: "ORMItem", mapping) -> int:
+            def get_node_index_in_mapping(node: "QueueItem", mapping) -> int:
                 key = node.get_primary_key_and_value(only_key=True)
                 key = (key.upper(), key,)
                 if key in mapping:
@@ -1359,7 +1359,7 @@ class LettersSort(LettersSortSingleNodes, LettersSortNodesChain):
             super(LettersSortSingleNodes, self).__init__(nodes)
         if nodes_group_chain is not None:
             super(LettersSortNodesChain, self).__init__(nodes_group_chain)
-        if sum((bool(nodes), bool(nodes_group_chain),)) != 1:
+        if not sum((bool(nodes), bool(nodes_group_chain),)) == 1:
             raise ValueError
         if type(self._reverse) is not bool:
             raise TypeError
@@ -1417,7 +1417,7 @@ class OrderByMixin(ABC):
         ...
 
     def __is_valid_order_by_params(self, model, by_column_name, by_primary_key, by_create_time, length, alphabet, decr):
-        ORMItem.is_valid_model_instance(model)
+        QueueItem.is_valid_model_instance(model)
         if by_column_name is not None:
             if type(by_column_name) is not str:
                 raise TypeError
@@ -1448,7 +1448,7 @@ class OrderByMixin(ABC):
         
         
 class OrderBySingleResultMixin(OrderByMixin):
-    """ Реализация для 'одиночного результата',- запрос к одной таблице. См ORMHelper.get_items() """
+    """ Реализация для 'одиночного результата',- запрос к одной таблице. См Main.get_items() """
     def order_by(self, by_column_name: Optional[str] = None, by_primary_key: Optional[bool] = None,
                  by_create_time: Optional[bool] = None, length: bool = False, alphabet: bool = False,
                  decr: bool = False):
@@ -1484,7 +1484,7 @@ class OrderBySingleResultMixin(OrderByMixin):
 
 
 class OrderByJoinResultMixin(OrderByMixin, ModelTools):
-    """ Реализация для запросов с join. См ORMHelper.join_select() """
+    """ Реализация для запросов с join. См Main.join_select() """
     def order_by(self: "JoinSelectResult", model, by_column_name: Optional[str] = None,
                  by_primary_key: Optional[bool] = None,
                  by_create_time: Optional[bool] = None, length: bool = False, alphabet: bool = False,
@@ -1525,19 +1525,19 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
 class SQLAlchemyQueryManager:
     MAX_RETRIES: Union[int, Literal["no-limit"]] = "no-limit"
 
-    def __init__(self, connection_path: str, nodes: "ORMItemQueue"):
+    def __init__(self, connection_path: str, nodes: "Queue"):
         def valid_node_type():
-            if type(nodes) is not ORMItemQueue:
+            if type(nodes) is not Queue:
                 raise ValueError
-        if not isinstance(nodes, ORMItemQueue):
+        if not isinstance(nodes, Queue):
             raise TypeError
         if type(connection_path) is not str:
             raise TypeError
         valid_node_type()
         self.path = connection_path
         self._node_items = nodes
-        self.remaining_nodes = ORMItemQueue()  # Отложенные для следующей попытки
-        self._sorted: list[ORMItemQueue] = []  # [[save_point_group {pk: val,}], [save_point_group]...]
+        self.remaining_nodes = Queue()  # Отложенные для следующей попытки
+        self._sorted: list[Queue] = []  # [[save_point_group {pk: val,}], [save_point_group]...]
         self._query_objects: dict[Union[Insert, Update, Delete]] = {}  # {node_index: obj}
 
     def start(self):
@@ -1560,7 +1560,7 @@ class SQLAlchemyQueryManager:
             return
         if not self._query_objects:
             return
-        session = ORMHelper.database
+        session = Main.database
         while sorted_data:
             node_group = sorted_data.pop(-1)
             if not node_group:
@@ -1599,9 +1599,9 @@ class SQLAlchemyQueryManager:
         self._sorted = []
         self._query_objects = {}
 
-    def _sort_nodes(self) -> list[ORMItemQueue]:
+    def _sort_nodes(self) -> list[Queue]:
         """ Сортировать ноды по признаку внешних ключей, определить точки сохранения для транзакций """
-        def make_sort_container(n: ORMItem, linked_nodes: ORMItemQueue, has_related_nodes):
+        def make_sort_container(n: QueueItem, linked_nodes: Queue, has_related_nodes):
             """
             Рекурсивно искать ноды с внешними ключами
             O(m) * (O(n) + O(j)) = O(n) * O(m) = O(n)
@@ -1619,11 +1619,11 @@ class SQLAlchemyQueryManager:
         if self._sorted:
             return self._sorted
         node_ = self._node_items.dequeue()
-        other_single_nodes = ORMItemQueue()
+        other_single_nodes = Queue()
         while node_:
             if self.MAX_RETRIES == "no-limit" or node_.retries < self.MAX_RETRIES:
                 if node_.ready:
-                    recursion_result = make_sort_container(node_, ORMItemQueue(), False)
+                    recursion_result = make_sort_container(node_, Queue(), False)
                     if recursion_result is not None:
                         self._sorted.append(recursion_result)
                     else:
@@ -1637,7 +1637,7 @@ class SQLAlchemyQueryManager:
         return self._sorted
 
 
-class SpecialOrmItem(ORMItem):
+class ServiceOrmItem(QueueItem):
     def get(self, name, default_val=None):
         try:
             result = self.__getitem__(name)
@@ -1664,19 +1664,19 @@ class SpecialOrmItem(ORMItem):
 
     @classmethod
     def _is_valid_container(k, item):
-        if not isinstance(item, SpecialOrmContainer):
+        if not isinstance(item, ServiceOrmContainer):
             raise TypeError(f"Данная нода должна быть в {k.__name__}, а не в {type(item).__name__}")
 
 
-class SpecialOrmContainer(ORMItemQueue):
-    """ Данный контейнер для использования в JoinSelectResult (результат вызова ORMHelper.join_select) """
-    LinkedListItem: Union[SpecialOrmItem, ResultORMItem] = SpecialOrmItem
+class ServiceOrmContainer(Queue):
+    """ Данный контейнер для использования в JoinSelectResult (результат вызова Main.join_select) """
+    LinkedListItem: Union[ServiceOrmItem, ResultORMItem] = ServiceOrmItem
 
     @property
     def hash_by_pk(self):
         return sum(map(lambda x: x.hash_by_pk, self))
 
-    def __getitem__(self, model_name_or_index: Union[str, int]) -> Union[DoesNotExists, "SpecialOrmContainer", LinkedListItem]:
+    def __getitem__(self, model_name_or_index: Union[str, int]) -> Union[DoesNotExists, "ServiceOrmContainer", LinkedListItem]:
         if not isinstance(model_name_or_index, (str, int,)):
             raise TypeError
         if type(model_name_or_index) is int:
@@ -1694,21 +1694,21 @@ class SpecialOrmContainer(ORMItemQueue):
 
 
 class NodeTypeConverter:
-    TYPES = (ORMItem, ResultORMItem, SpecialOrmItem,)
+    TYPES = (QueueItem, ResultORMItem, ServiceOrmItem,)
     input_cls = None
     output_cls = None
 
     @classmethod
     def convert(cls, node):
         cls.__is_valid_configuration()
-        if cls.input_cls is ResultORMItem and cls.output_cls is ORMItem:
+        if cls.input_cls is ResultORMItem and cls.output_cls is QueueItem:
             return cls._result_orm_item_to_orm_item_queue(node)
 
     @staticmethod
     def _result_orm_item_to_orm_item_queue(node: ResultORMItem):
         values = node.value
         del values["ui_hidden"]
-        return ORMItem(_model=node.model, _update=True, **values, _container=ORMItemQueue())
+        return QueueItem(_model=node.model, _update=True, **values, _container=Queue())
 
     @classmethod
     def __is_valid_configuration(cls):
@@ -1718,20 +1718,17 @@ class NodeTypeConverter:
             raise TypeError
 
 
-class ORMHelper(ORMAttributes):
+class Main(ORMAttributes):
     """
-    Адаптер для ORMItemQueue
-    Имеет таймер для единовременного высвобождения очереди объектов,
-    при добавлении элемента в очередь таймер обнуляется.
-    свойство items - ссылка на экземпляр ORMItemQueue.
+    Главный класс
     1) Инициализация
-        LinkToObj = ORMHelper
+        LinkToObj = Main
     2) Установка ссылки на класс модели Flask-SqlAlchemy
         LinkToObj.set_model(CustomModel)
     3) Использование
         LinkToObj.set_item(name, data, **kwargs) - Установка в очередь, обнуление таймера
-        LinkToObj.get_item(name, **kwargs) - получение данных из бд и из ноды
-        LinkToObj.get_items(model=None) - получение данных из бд и из ноды
+        LinkToObj.get_item(name, **kwargs) - получение данных из бд и из нод в локальном расположении
+        LinkToObj.get_items(model=None) - получение данных из бд и из нод в локальном расположении
         LinkToObj.release() - высвобождение очереди с попыткой сохранить объекты в базе данных
         в случае неудачи нода переносится в конец очереди
         LinkToObj.remove_items - принудительное изъятие ноды из очереди.
@@ -1792,9 +1789,9 @@ class ORMHelper(ORMAttributes):
 
     @classmethod
     @property
-    def items(cls) -> ORMItemQueue:
+    def items(cls) -> Queue:
         """ Вернуть локальные элементы """
-        return cls.cache.get("ORMItems", ORMItemQueue())
+        return cls.cache.get("ORMItems", Queue())
 
     @classmethod
     def set_item(cls, _model=None, _insert=False, _update=False,
@@ -1803,7 +1800,7 @@ class ORMHelper(ORMAttributes):
         if isinstance(_model, str):
             model = ModelTools.import_model(_model)
         cls.is_valid_model_instance(model)
-        items: ORMItemQueue = cls.items
+        items: Queue = cls.items
         items.enqueue(_model=model, _ready=_ready,
                       _insert=_insert, _update=_update,
                       _delete=_delete, _where=_where, _create_at=datetime.datetime.now(), _container=items,
@@ -1839,7 +1836,7 @@ class ORMHelper(ORMAttributes):
                     raise OperationalError
 
             def add_to_queue():
-                result = ORMItemQueue()
+                result = Queue()
                 for item in items_db:
                     col_names = model().column_names
                     result.append(**{key: item.__dict__[key] for key in col_names}, _insert=True, _model=model,
@@ -1914,7 +1911,7 @@ class ORMHelper(ORMAttributes):
                         left_model = left_table_dot_field.split(".")[0]
                         right_model = right_table_dot_field.split(".")[0]
                         models_at_on.update((left_model, right_model,))
-                    if len(total_models) != len(models_at_on):
+                    if not len(total_models) == len(models_at_on):
                         raise ValueError
             [cls.is_valid_model_instance(m) for m in models]
             if not models:
@@ -1955,17 +1952,17 @@ class ORMHelper(ORMAttributes):
                     raise AttributeError(f"Столбец {right_model_field} у таблицы {right_model} не найден")
             if not is_self_references():
                 if len(models) == 2:
-                    if len(_on.keys()) + len(_on.values()) != len(models):
+                    if not len(_on.keys()) + len(_on.values()) == len(models):
                         raise ValueError(
                             "Правильный способ работы с данным методом: join_select(model_a, model,b, on={model_b.column_name: 'model_a.column_name'})"
                         )
                 if len(models) > 2:
-                    if len(_on.keys()) + len(_on.values()) != len(models) + 1:
+                    if not len(_on.keys()) + len(_on.values()) == len(models) + 1:
                         raise ValueError(
                             "Правильный способ работы с данным методом: join_select(model_a, model,b, on={model_b.column_name: 'model_a.column_name'})"
                         )
             else:
-                if len(models) != 1:
+                if not len(models) == 1:
                     raise ValueError("При join запросе таблицы 'замой на себя', должна быть указана 1 таблица, "
                                      "к которой выполняется запрос")
             check_transitivity_on_params()
@@ -1993,11 +1990,11 @@ class ORMHelper(ORMAttributes):
                         s += ")" if on_keys_counter == where.__len__() else ""
                 return s
 
-            def add_db_items_to_orm_queue() -> Iterator[SpecialOrmContainer]:  # O(i) * O(k) * O(m) * O(n) * O(j) * O(l)
+            def add_db_items_to_orm_queue() -> Iterator[ServiceOrmContainer]:  # O(i) * O(k) * O(m) * O(n) * O(j) * O(l)
                 data = query.all()
                 for data_row in data:  # O(i)
-                    row = SpecialOrmContainer()
-                    row.LinkedListItem = SpecialOrmItem
+                    row = ServiceOrmContainer()
+                    row.LinkedListItem = ServiceOrmItem
                     for join_select_result in data_row:
                         all_column_names = getattr(type(join_select_result), "column_names")
                         r = {col_name: col_val for col_name, col_val in join_select_result.__dict__.items()
@@ -2011,13 +2008,13 @@ class ORMHelper(ORMAttributes):
             return add_db_items_to_orm_queue()
 
         def collect_all_local_nodes():  # n**2!
-            heap = ORMItemQueue()
+            heap = Queue()
             temp = cls.items
             for model in models:  # O(n)
                 heap += temp.search_nodes(model, **where.get(model.__name__, {}))  # O(n * k)
             return heap
 
-        def collect_local_data() -> Iterator[SpecialOrmContainer]:
+        def collect_local_data() -> Iterator[ServiceOrmContainer]:
             def collect_node_values(on_keys_or_values: Union[dict.keys, dict.values]):  # f(n) = O(n) * (O(k) * O(u) * (O(l) * O(m)) * O(y)); g(n) = O(n * k)
                 for node in collect_all_local_nodes():  # O(n)
                     for table_and_column in on_keys_or_values:  # O(k)
@@ -2040,8 +2037,8 @@ class ORMHelper(ORMAttributes):
                     left_model_name, left_node = itertools.chain.from_iterable(left_data.items())  # O(j)
                     for right_data in model_right_primary_key_and_value:  # O(k)
                         right_model_name, right_node = itertools.chain.from_iterable(right_data.items())  # O(l)
-                        raw = SpecialOrmContainer()  # O(1)
-                        raw.LinkedListItem = SpecialOrmItem
+                        raw = ServiceOrmContainer()  # O(1)
+                        raw.LinkedListItem = ServiceOrmItem
                         for left_table_dot_field, right_table_dot_field in _on.items():  # O(b)
                             left_table_name_in_on, left_table_field_in_on = left_table_dot_field.split(".")  # O(a)
                             right_table_name_in_on, right_table_field_in_on = right_table_dot_field.split(".")  # O(a)
@@ -2167,7 +2164,7 @@ class ORMHelper(ORMAttributes):
     def _init_timer(cls):
         timer = threading.Timer(cls.RELEASE_INTERVAL_SECONDS, cls.release)
         timer.daemon = True
-        timer.setName("ORMHelper(database push queue)")
+        timer.setName("Main(database push queue)")
         timer.start()
         return timer
 
@@ -2198,7 +2195,7 @@ class ORMHelper(ORMAttributes):
             return {pk: value[pk]}
 
 
-class ResultCacheTools(ORMHelper):
+class ResultCacheTools(Main):
     TEMP_HASH_PREFIX: str = ...
     RESULT_CACHE_KEY: str = ...
     __iter__ = abstractmethod(lambda self: ...)
@@ -2436,7 +2433,7 @@ class BaseResult(ABC, ResultCacheTools):
 
 
 class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
-    """ Экземпляр данного класса возвращается функцией ORMHelper.get_items() """
+    """ Экземпляр данного класса возвращается функцией Main.get_items() """
     RESULT_CACHE_KEY = "simple_result"
     TEMP_HASH_PREFIX = "simple_item_hash"
 
@@ -2453,31 +2450,31 @@ class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
         super().__init__(*args, model=model, where=where, **kwargs)
 
     def _merge(self):
-        output = SpecialOrmContainer()
+        output = ServiceOrmContainer()
         local_items = self.get_local_nodes()
         database_items = self.get_nodes_from_database()
         [output.enqueue(**node.get_attributes(new_container=output))
          for collection in (database_items, local_items,) for node in collection]
         return ResultORMCollection(output)
 
-    def _get_node_by_joined_primary_key_and_value(self, value: Union[str, int]) -> Optional[ORMItem]:
+    def _get_node_by_joined_primary_key_and_value(self, value: Union[str, int]) -> Optional[QueueItem]:
         model, pk, val = self._parse_joined_primary_key_and_value(value)
         return self.items.get_node(model, **{pk: val})
 
 
 class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
     """
-    Экземпляр этого класса возвращается функцией ORMHelper.join_select()
-    1 экземпляр этого класса 1 результат вызова ORMHelper.join_select()
+    Экземпляр этого класса возвращается функцией Main.join_select()
+    1 экземпляр этого класса 1 результат вызова Main.join_select()
     Использовать следующим образом:
         Делаем join_select
         Результаты можем вывести в какой-нибудь Q...Widget, этот результат (строки) можно привязать к содержимому,
         чтобы вносить правки со стороны UI, ни о чём лишнем не думая
         JoinSelectResultInstance.pointer = ['Некое значение из виджета1', 'Некое значение из виджета2',...]
-        Теперь нужный инстанс SpecialOrmContainer можно найти:
-        JoinSelectResultInstance.pointer['Некое значение из виджета1'] -> SpecialOrmContainer(node_model_a, node_model_b, node_model_c)
+        Теперь нужный инстанс ServiceOrmContainer можно найти:
+        JoinSelectResultInstance.pointer['Некое значение из виджета1'] -> ServiceOrmContainer(node_model_a, node_model_b, node_model_c)
         Если нода потеряла актуальность(удалена), то вместо неё будет заглушка - Экземпляр EmptyORMItem
-        SpecialOrmContainer имеет свойство - is_actual на которое можно опираться
+        ServiceOrmContainer имеет свойство - is_actual на которое можно опираться
     """
     TEMP_HASH_PREFIX = "join_select_hash"
     RESULT_CACHE_KEY = "join_result"
@@ -2527,7 +2524,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
             self._save_result_collection(result)
         return result
 
-    def __getitem__(self, item: int) -> SpecialOrmContainer:
+    def __getitem__(self, item: int) -> ServiceOrmContainer:
         if not isinstance(item, int):
             raise TypeError
         if item not in self:
@@ -2536,12 +2533,12 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
             if hash(group) == item:
                 return group
 
-    def __contains__(self, item: Union[int, SpecialOrmContainer, SpecialOrmItem]):
-        if not isinstance(item, (SpecialOrmContainer, SpecialOrmItem, int,)):
+    def __contains__(self, item: Union[int, ServiceOrmContainer, ServiceOrmItem]):
+        if not isinstance(item, (ServiceOrmContainer, ServiceOrmItem, int,)):
             return False
         if type(item) is int:
             return item in map(lambda x: hash(x), self)
-        if isinstance(item, (SpecialOrmItem, SpecialOrmContainer,)):
+        if isinstance(item, (ServiceOrmItem, ServiceOrmContainer,)):
             return hash(item) in map(lambda x: x.__hash__(), self)
         return False
 
@@ -2554,7 +2551,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
         то эту ноду УДАЛЯЕМ ИЗ НОД ИЗ БАЗЫ. Если длина этой группы нод <=1, то мы эту группу удаляем целиком
         3) На фильтрованные ноды из базы накладываем ноды из кеша, оставшиеся добавляем в хвост
         """
-        def get_local_nodes_with_any_value_in_fk(local_nodes: list[SpecialOrmContainer]):
+        def get_local_nodes_with_any_value_in_fk(local_nodes: list[ServiceOrmContainer]):
             """ Все локальные ноды, смешанные в кучу, в которых, в значениях внешних ключей, стоит какое-то значение """
             def collect_foreign_keys_at_local_items():
                 for group in local_nodes:
@@ -2562,7 +2559,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                         foreign_keys = ModelTools.get_foreign_key_columns(node.model)
                         if foreign_keys:
                             yield node.model.__name__, foreign_keys
-            res = SpecialOrmContainer()
+            res = ServiceOrmContainer()
             foreign_keys_at_local_items = tuple(collect_foreign_keys_at_local_items())
             for group in local_nodes:
                 tables_map = {node.model.__name__: node.model for node in group}
@@ -2578,7 +2575,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
             nodes_with_foreign_keys_at_local_items = get_local_nodes_with_any_value_in_fk(local_items)
             for db_nodes_group in self.get_nodes_from_database() if not self._only_queue else []:
                 for local_node_with_fk in nodes_with_foreign_keys_at_local_items:
-                    result: SpecialOrmItem = db_nodes_group.get_node(local_node_with_fk.model,
+                    result: ServiceOrmItem = db_nodes_group.get_node(local_node_with_fk.model,
                                                                      **local_node_with_fk.get_primary_key_and_value())
                     if not result:
                         if db_nodes_group.hash_by_pk not in currently_added_hash:
@@ -2644,7 +2641,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                 return node
 
 
-class PointerCacheTools(ORMHelper):
+class PointerCacheTools(Main):
     POINTER_CACHE_PREFIX = "p_id"
     WRAP_ITEM_MAX_LENGTH = 30
 
