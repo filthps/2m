@@ -269,12 +269,12 @@ class TestLinkedList(unittest.TestCase):
 
 class TestORMItemQueue(unittest.TestCase):
     def setUp(self) -> None:
-        ORMHelper.CACHE_PATH = CACHE_PATH
-        ORMHelper.DATABASE_PATH = DATABASE_PATH
+        Main.CACHE_PATH = CACHE_PATH
+        Main.DATABASE_PATH = DATABASE_PATH
 
     def test_init(self):
-        ORMItemQueue()
-        queue = ORMItemQueue()
+        Queue()
+        queue = Queue()
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                  "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
                  "_primary_key_from_ui": False, "machinename": "Test"},
@@ -285,10 +285,10 @@ class TestORMItemQueue(unittest.TestCase):
                  "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
                  "_primary_key_from_ui": False, "machinename": "NewTest"
                  }]
-        new_queue = ORMItemQueue(data)
+        new_queue = Queue(data)
 
     def test_enqueue(self):
-        queue = ORMItemQueue()
+        queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
                         "_primary_key_from_ui": False, "machinename": "Test"},
@@ -329,7 +329,7 @@ class TestORMItemQueue(unittest.TestCase):
         # Столбец machinename с uniqie=True: произойдёт репликация без добавления новой ноды,
         # вместо этого будет замена старой ноды с дополнением её содержимого
         #
-        queue = ORMItemQueue()
+        queue = Queue()
         data__len_1 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
                         "_primary_key_from_ui": False, "machinename": "Test", "xover": 10},
@@ -347,7 +347,7 @@ class TestORMItemQueue(unittest.TestCase):
         #
         #  Ситуация, когда первичный ключ был передан явно
         #
-        queue = ORMItemQueue()
+        queue = Queue()
         data_with_primary_key_from_ui = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                                           "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
                                           "_primary_key_from_ui":
@@ -370,7 +370,7 @@ class TestORMItemQueue(unittest.TestCase):
                 assert False
 
     def test_dequeue(self):
-        queue = ORMItemQueue()
+        queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
                         "_primary_key_from_ui": False, "machinename": "Test"},
@@ -406,7 +406,7 @@ class TestORMItemQueue(unittest.TestCase):
             queue[2]
 
     def test_remove_node_from_queue(self):
-        queue = ORMItemQueue()
+        queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
                         "_primary_key_from_ui": False, "machinename": "Test"},
@@ -435,9 +435,9 @@ class TestORMItemQueue(unittest.TestCase):
 
 class TestResultORMCollection(unittest.TestCase):
     def setUp(self) -> None:
-        ORMHelper.CACHE_PATH = CACHE_PATH
-        ORMHelper.DATABASE_PATH = DATABASE_PATH
-        queue = ORMItemQueue()
+        Main.CACHE_PATH = CACHE_PATH
+        Main.DATABASE_PATH = DATABASE_PATH
+        queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
                         "_primary_key_from_ui": False, "machinename": "Test"},
@@ -519,11 +519,11 @@ class TestResultORMCollection(unittest.TestCase):
 
 class TestORMHelper(unittest.TestCase, SetUp):
     def setUp(self) -> None:
-        ORMHelper.TESTING = True
-        ORMHelper.CACHE_LIFETIME_HOURS = 60
-        ORMHelper.CACHE_PATH = CACHE_PATH
-        ORMHelper.DATABASE_PATH = DATABASE_PATH
-        self.orm_manager = ORMHelper()
+        Main.TESTING = True
+        Main.CACHE_LIFETIME_HOURS = 60
+        Main.CACHE_PATH = CACHE_PATH
+        Main.DATABASE_PATH = DATABASE_PATH
+        self.orm_manager = Main()
 
     def test_cache_property(self):
         """ Что вернёт это свойство: Если эклемпляр Client, то OK """
@@ -599,7 +599,7 @@ class TestORMHelper(unittest.TestCase, SetUp):
         # GOOD
         self.orm_manager.set_item(_insert=True, _model=Cnc, name="Fid", commentsymbol="$")
         self.assertIsNotNone(self.orm_manager.cache.get("ORMItems"))
-        self.assertIsInstance(self.orm_manager.cache.get("ORMItems"), ORMItemQueue)
+        self.assertIsInstance(self.orm_manager.cache.get("ORMItems"), Queue)
         self.assertEqual(self.orm_manager.cache.get("ORMItems").__len__(), 1)
         self.assertTrue(self.orm_manager.items[0]["name"] == "Fid")
         self.orm_manager.set_item(_insert=True, _model=Machine, machinename="Helller",
@@ -820,6 +820,11 @@ class TestORMHelper(unittest.TestCase, SetUp):
         self.assertEqual(2, result.__len__())
         self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
         self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
+        # Нарушить связь PK - FK
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")  # Теперь убедимся, что видим результат из базы данных,
+        # потому как cncid == 9 не существует ни в результатах из базы, ни в локальных результатах
+        self.assertEqual(result.items[0]["Cnc"]["name"], "NC210")
 
     @drop_cache
     @db_reinit
@@ -919,11 +924,11 @@ class TestORMHelper(unittest.TestCase, SetUp):
 
 class TestResultPointer(unittest.TestCase, SetUp):
     def setUp(self) -> None:
-        ORMHelper.TESTING = True
-        ORMHelper.CACHE_LIFETIME_HOURS = 60
-        ORMHelper.CACHE_PATH = CACHE_PATH
-        ORMHelper.DATABASE_PATH = DATABASE_PATH
-        self.orm_manager = ORMHelper
+        Main.TESTING = True
+        Main.CACHE_LIFETIME_HOURS = 60
+        Main.CACHE_PATH = CACHE_PATH
+        Main.DATABASE_PATH = DATABASE_PATH
+        self.orm_manager = Main()
 
     @drop_cache
     @db_reinit
@@ -1031,18 +1036,12 @@ class TestResultPointer(unittest.TestCase, SetUp):
         self.assertRaises(KeyError, result.pointer.has_changes, "Ещё Не установленный во wrapper элемент",)
         self.assertRaises(KeyError, result.pointer.has_changes, "Другой не установленный во wrapper элемент")
         self.assertFalse(result.pointer.has_changes("Результат в списке 1"))
-        # Нарушить связь PK - FK
-        print(result.pointer.items['Результат в списке 1'])
-        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
-        print(result.pointer.is_valid)
-        print(result.pointer.items['Результат в списке 1'])
-
 
 """  not supported - ver 1.
 class TestQueueOrderBy(unittest.TestCase, SetUp):
     def setUp(self) -> None:
-        ORMHelper.TESTING = True
-        ORMHelper.CACHE_LIFETIME_HOURS = 60
+        Main.TESTING = True
+        Main.CACHE_LIFETIME_HOURS = 60
         self.orm_manager = ORMHelper
 
     @db_reinit
