@@ -1,4 +1,4 @@
-#<center>2-method ORM</center>
+# <center>2-method ORM</center>
 ![intro](readme_images/presentation/Презентация-1.png)
 ![abc](readme_images/presentation/Презентация-2.png)
 ![replication](readme_images/presentation/Презентация-3.png)
@@ -126,10 +126,11 @@
 
 ----
 
-##<center>Содержимое результата</center>
-###<center>Union[*ResultORMCollection*, *ResultORMItem*]</center>
+## <center>Содержимое результата</center>
 
-###Контейнер *ResultORMCollection*
+### <center>Union[*ResultORMCollection*, *ResultORMItem*]</center>
+
+### Контейнер *ResultORMCollection*
 
 Контейнеры с данными, возвращаемые объектом результата. Иммутабелен.
 
@@ -145,7 +146,7 @@
 - - **get_all_visible_items** - *свойство(property)*. Главное свойство, которое выдаёт результат, предназначенный для использования. Он же в *__iter__* и *__len__*.
 - - **all_nodes** - Итератор со всеми *ResultORMItem*. 
 Он возвращает все ноды, включая те, которые находятся в очереди и должны сделать delete в базе данных.
-> Призываю его не использовать :rage:
+> Призываю не использовать метод *all_nodes*, он нужен для служебного пользования :rage:
 
 - - **get_node**(*model*, *primary_key*, *value*) - Получить *ResultORMItem* или Exception.
 - - **search_nodes**(*model*, **столбцы_и_значения) - Получить коллекцию *ResultORMItem* или пустую коллекцию.
@@ -160,6 +161,7 @@
 4. Названию таблицы (может вернуть несколько)
 
 ### Единица результата *ResultORMItem*
+
 <br>
 
 - - **value** - *свойство(property)* - Словарь с содержимым в виде <code>{столбец: значение}</code>.
