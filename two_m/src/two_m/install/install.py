@@ -40,7 +40,7 @@ REQUIRED_PYTHON_VERSION = '3.7'
 INSTALLATION_PATH = os.path.abspath(os.getcwd())
 REQUIREMENTS_LIST = read_requirements()
 MAX_RETRIES_CHECK_REQUIREMENTS = 10
-DELAY_SEC_RETRY_CHECK_REQUIREMENTS = 5 * 1000
+DELAY_SEC_RETRY_CHECK_REQUIREMENTS = 2 * 1000
 
 
 def check_items_is_exist(path):
@@ -59,16 +59,16 @@ def install_requirements():
 
 def check_requirements():
     def is_success(data: CompletedProcess, counter=0) -> bool:
-        if data.returncode < 0:
+        if data.returncode < 0:  # Процесс завершился ошибкой
             return False
-        if not data.returncode == 0:
-            print(f"Повторная проверка наличия requirements через {DELAY_SEC_RETRY_CHECK_REQUIREMENTS // 1000} секунд")
-            print(f"Попытка {counter} из {MAX_RETRIES_CHECK_REQUIREMENTS}")
-            if counter == MAX_RETRIES_CHECK_REQUIREMENTS:
-                return False
-            time.sleep(DELAY_SEC_RETRY_CHECK_REQUIREMENTS)
-            return is_success(data, counter=counter + 1)
-        return True
+        if data.returncode == 0:  # Процесс завершился ОК
+            return True
+        print(f"Повторная проверка наличия requirements через {DELAY_SEC_RETRY_CHECK_REQUIREMENTS // 1000} секунд")
+        print(f"Попытка {counter} из {MAX_RETRIES_CHECK_REQUIREMENTS}")
+        if counter == MAX_RETRIES_CHECK_REQUIREMENTS:
+            return False
+        time.sleep(DELAY_SEC_RETRY_CHECK_REQUIREMENTS)
+        return is_success(data, counter=counter + 1)
 
     def check_not_installed_package_names(names: typing.Iterable):
         return frozenset(map(lambda x: x.split('==')[0], REQUIREMENTS_LIST)) - \
@@ -108,7 +108,9 @@ def check_requirements():
 
 
 def copy_items():
-    shutil.copytree(TEMPLATES_URL, os.getcwd(),
+    root_path = os.path.join(os.getcwd(), "two_m")
+    os.mkdir(root_path)
+    shutil.copytree(TEMPLATES_URL, os.path.join(os.getcwd(), "two_m"),
                     ignore=shutil.ignore_patterns('*.pyc', 'tmp*'))
 
 
@@ -125,3 +127,4 @@ if __name__ == '__main__':
     print("3/4 -- OK check exists requirements")
     copy_items()
     print("4/4 -- OK copy files")
+    print("Success")
