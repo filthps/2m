@@ -6,14 +6,78 @@
 ![append-node](readme_images/presentation/Презентация-5.png)
 ![push-queue](readme_images/presentation/Презентация-6.png)
 ![stack-example](readme_images/presentation/Презентация-7.png)
+
 --------
 --------
+
 # <center>К практике</center>
+
+# <center>Quickstart guide</center>
+
+<code>> pip install 2m</code>
+
+Переходим в рабочий каталог своего приложения:
+
+<code>> cd ../path_to_your_ui</code>
+
+Устанавливаем зависимые пакеты, сверяем соответствие, развёртываем пакет с модулями:
+
+<code>> py</code>
+
+<code>>> from two_m.install import install </code>
+
+<code>>> install() </code>
+
+----
+
+Теперь в вашем текущем покете появился пакет **two_m**.
+
+* Опишем свои таблицы в **models.py**
+
+> Обращаю ваше внимание на официальную документацию Flask-SQLAlchemy
+> https://flask-sqlalchemy.readthedocs.io/en/stable/legacy-quickstart/#define-models
+
+* **procedures.py**
+
+Если нужно работать с хранимыми процедурами, декларируем их в виде экземпляров класса **DDL**.
+
+> Документация SqlAlchemy относительно объектов DDL
+> https://docs.sqlalchemy.org/en/20/core/ddl.html#custom-ddl
+
+* Настроим **.env** файл, содержащий константы, которые конфигурируют работу базы данных и локального хранилища 
+
+* Наконец можно приступить к использованию! Импортируем класс **ORM** и начнём работу!
+
+<code>
+
+    from two_m.models import SomeModel
+    from two_m.main import ORM
+    ...
+    ...
+    ...
+    class Something:
+        def __init__():
+            self.tool = ORM()
+            self.tool.set_model(SomeModel)
+    
+        def ui_action_a():
+            self.tool.set_item(...)
+
+        def ui_action_b():
+            self.tool.set_item(...)
+
+        def ui_action_b():
+            items = self.tool.get_items(...)
+            ...
+</code>
+
+----
+
 *<center>Рассмотрим функционал, который является основной компетенций данного фреймворка</center>*
 <br>
 - ### <code>*orm*.**set_item**(*_model*=None, *_ready*=False, *_insert*=False, *_update*=False, *_delete*=False, *_where*=None, **values)</code>
 Установить в очередь запись-кандидата, которая появится в базе данных при первой возможности
-- *_model*: Таблица из модуля ***models.py***. Можно не указывать, если в текущем контексте (вашего приложения)
+- - *_model*: Таблица из модуля ***models.py***. Можно не указывать, если в текущем контексте (вашего приложения)
 уже установлена таблица в качестве основной (смотри класс ORM, метод set_model)
 - - *_ready*: Логическое значение. До тех пор, пока это значение False, нода будет находиться в очереди, 
 но commit базы данных не попадёт. Идеальный способ передавать ответ от вашего *валидатора*
@@ -33,7 +97,7 @@
 - - *return* Result
 <br>
 - ### <code>*orm*.**join_select**(**models*, _db_only=False, _queue_only=False, _on=None, **where)</code>
-- - **models*: Таблицы из модуля ***models.py*** между которыми существует отношение (PK-FK)
+- - *models*: Таблицы из модуля ***models.py*** между которыми существует отношение (PK-FK)
 - - *_db_only*: Получать данные только из базы данных, игнорируя локальные элементы
 - - *_queue_only*: Получать данные только из локальной очереди элементов, игнорируя базу данных
 - - *_on*: Словарь. Выражение ON в JOIN запросах. modelName.column1: modelName2.column2
@@ -172,9 +236,9 @@
 - - **get_primary_key_and_value**(*only_key=False, only_val=False*) - Словарь. Пара <code>{столбец: значение}</code>. Или что-то одно.
 - - **add_model_name_prefix** - *Метод(callable)*. Добавить каждому ключу в словаре **value** префикс с названием таблицы.
 - - **remove_model_name_prefix** - *Метод(callable)*. Удалить префиксы.
-- *__hash__* - Получить полную хеш-сумму всех значений в словаре значений.
+- - *__hash__* - Получить полную хеш-сумму всех значений в словаре значений.
 - - *__contains__* - 2 варианта использования:
 1. строка вида <code>имя_столбца:значение</code>
 2. просто имя столбца
 - - *__getitem__* - Получить значение столбца по его наименованию <code>value = node["table_column"]</code>
-- *__bool__* - От длины словаря **value**
+- - *__bool__* - От длины словаря **value**
