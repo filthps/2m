@@ -33,8 +33,8 @@ setup(
     ],
     keywords='orm pyqt flask flask-sqlalchemy gui ui pyside2',
     project_urls={
-        'Documentation': 'link'
+        'Documentation': 'https://github.com/filthps/2m'
     },
     python_requires='>=3.7',
-    namespace_packages=['two_m']
+    namespace_packages=['2m']
 )
