@@ -5,7 +5,7 @@ requires = [
 build-backend = "setuptools.build_meta"
 [project]
 name = "two_m"
-version = "1.0.0"
+version = "1.0.8"
 authors = [
   { name="Victor Litovchenko", email="filpsixi@mail.ru" },
 ]

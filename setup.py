@@ -8,13 +8,13 @@ def readme():
 
 setup(
     name='two_method_orm',
-    version='1.0.0',
+    version='1.0.8',
     author='filthps',
     author_email='filpsixi@mail.ru',
     description='This is my first module',
     long_description=readme(),
     long_description_content_type='text/markdown',
-    url='https://github.com/filthps/two_method_orm',
+    url='https://github.com/filthps/2m',
     packages=find_packages(),
     install_requires=[
         'Flask==3.0.2',
