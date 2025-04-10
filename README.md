@@ -23,7 +23,7 @@
 
 <code>> python -c "from two_m.install import install;exec(install.main())"</code>
 
-![stack-example](readme_images/install.png)
+![install](readme_images/install.png)
 
 Теперь в вашем текущем покете появился пакет **two_m**, содержащий несколько модулей, которые необходимо настроить.
 
@@ -46,7 +46,7 @@
 
 * Настроим **.env** файл, содержащий константы, которые конфигурируют работу базы данных и локального хранилища 
 
-![stack-example](readme_images/settings.png)
+![settings](readme_images/settings.png)
 
 * Наконец можно приступить к использованию! Импортируем класс **ORM** и начнём работу!
 
