@@ -15,7 +15,7 @@ class ModelController(AbstractModelController):
         # то заполнить даный словарь вручную
 
         def check_class_attributes():
-            """ Предотвратить использование заерезервированных в классе ORMHelper слов """
+            """ Предотвратить использование заерезервированных в классе orm.Main слов """
             for special_word in RESERVED_WORDS:
                 if hasattr(cls, f"__{cls.__name__}{special_word}"):
                     raise AttributeError(

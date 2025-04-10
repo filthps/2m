@@ -6,8 +6,9 @@ import os
 from dotenv import load_dotenv
 from two_m.orm import Main
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "database.env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "settings.env"))
 DATABASE_PATH = os.environ.get("DATABASE_PATH")
+MEMCACHE_PATH = os.environ.get("CACHE_PATH")
 
 
 class ORM(Main):

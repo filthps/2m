@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from sqlalchemy import DDL, create_engine
 from sqlalchemy.orm import Session, create_session
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "database.env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "settings.env"))
 DB_PATH = os.environ.get("DATABASE_PATH")
 
 
