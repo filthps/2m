@@ -6,8 +6,8 @@ from sqlalchemy import text, select
 from dotenv import load_dotenv
 from procedures import init_all_triggers
 from models import *
-from two_m.src.two_m.orm import *
-from two_m.src.two_m.exceptions import *
+from two_m.orm import *
+from two_m.exceptions import *
 from main import ORM
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "database.env"))
@@ -997,7 +997,6 @@ class TestResultPointer(unittest.TestCase, SetUp):
         # К счастью, текущий экземпляр result может получить новый pointer!, для этого
         # Нужно снова ассоциировать с сеттером pointer правильный кортеж(по длине) и содержимому без повторений
         result.pointer = ("Станок 1", "Станок 2", "Станок 3", "Станок 4", "Станок 5")
-        print(result.pointer["Станок 5"])  # machinename="somenewmachinename" строка 921!
         self.assertEqual(result.pointer["Станок 5"]["machinename"], "somenewmachinename")
 
     @drop_cache
