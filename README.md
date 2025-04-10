@@ -1,4 +1,3 @@
-# <center>2-method ORM</center>
 ![intro](readme_images/presentation/Презентация-1.png)
 ![abc](readme_images/presentation/Презентация-2.png)
 ![replication](readme_images/presentation/Презентация-3.png)
@@ -10,9 +9,9 @@
 --------
 --------
 
-# <center>К практике</center>
-
 # <center>Quickstart guide</center>
+
+## Инициализация
 
 <code>> pip install 2m</code>
 
@@ -22,15 +21,16 @@
 
 Устанавливаем зависимые пакеты, сверяем соответствие, развёртываем пакет с модулями:
 
-<code>> py</code>
+<code>> python -c "from two_m.install import install;exec(install.main())"</code>
 
-<code>>> from two_m.install import install </code>
+![stack-example](readme_images/install.png)
 
-<code>>> install() </code>
+Теперь в вашем текущем покете появился пакет **two_m**, содержащий несколько модулей, которые необходимо настроить.
 
 ----
 
-Теперь в вашем текущем покете появился пакет **two_m**.
+## Настройка
+
 
 * Опишем свои таблицы в **models.py**
 
@@ -45,6 +45,8 @@
 > https://docs.sqlalchemy.org/en/20/core/ddl.html#custom-ddl
 
 * Настроим **.env** файл, содержащий константы, которые конфигурируют работу базы данных и локального хранилища 
+
+![stack-example](readme_images/settings.png)
 
 * Наконец можно приступить к использованию! Импортируем класс **ORM** и начнём работу!
 
