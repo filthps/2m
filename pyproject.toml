@@ -4,19 +4,20 @@ requires = [
     ]
 build-backend = "setuptools.build_meta"
 [project]
-name = "two_m"
-version = "1.0.8"
+name = "2m"
+version = "1.0.21"
 authors = [
   { name="Victor Litovchenko", email="filpsixi@mail.ru" },
 ]
+license = "GNU"
 description = "A small package"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
-license-files = ["LICENSE"]
+license-files = ["LICENSE.txt"]
 [tool.setuptools]
 packages = ["two_m"]
 [project.urls]

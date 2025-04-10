@@ -3,7 +3,7 @@ Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 Адаптер для flask-sqlalchemy https://flask-sqlalchemy.readthedocs.io
 """
 from sqlalchemy.orm import InstrumentedAttribute
-from two_m.src.two_m.conf import RESERVED_WORDS, AbstractModelController
+from two_m.conf import RESERVED_WORDS, AbstractModelController
 
 
 class ModelController(AbstractModelController):
