@@ -10,7 +10,7 @@ from two_m.orm import *
 from two_m.exceptions import *
 from main import ORM
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "database.env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "settings.env"))
 CACHE_PATH = os.environ.get("CACHE_PATH")
 DATABASE_PATH = os.environ.get("DATABASE_PATH")
 

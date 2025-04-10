@@ -6,3 +6,4 @@ SQLAlchemy==2.0.28
 SQLAlchemy-Utils==0.38.2
 dill==0.3.9
 importlib-metadata==8.6.1
+psycopg2==2.9.3
