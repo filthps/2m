@@ -3,7 +3,7 @@ Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 Адаптер для flask-sqlalchemy https://flask-sqlalchemy.readthedocs.io
 """
 from sqlalchemy.orm import InstrumentedAttribute
-from two_m.src.two_m.conf import RESERVED_WORDS, AbstractModelController
+from two_m.conf import RESERVED_WORDS, AbstractModelController
 
 
 class ModelController(AbstractModelController):
@@ -15,7 +15,7 @@ class ModelController(AbstractModelController):
         # то заполнить даный словарь вручную
 
         def check_class_attributes():
-            """ Предотвратить использование заерезервированных в классе ORMHelper слов """
+            """ Предотвратить использование заерезервированных в классе orm.Main слов """
             for special_word in RESERVED_WORDS:
                 if hasattr(cls, f"__{cls.__name__}{special_word}"):
                     raise AttributeError(

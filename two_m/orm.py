@@ -34,11 +34,10 @@ from sqlalchemy.sql.dml import Insert, Update, Delete
 from sqlalchemy.sql.expression import select
 from sqlalchemy.orm import Query, sessionmaker as session_factory, Session, scoped_session
 from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
-from two_m.src.two_m.dill.serde import DillSerde
-from two_m.src.two_m.datatype import LinkedList, LinkedListItem
-from two_m.src.two_m.database.postgres.exceptions import DatabaseException
-from two_m.src.two_m.conf import RESERVED_WORDS, CustomModel
-from two_m.src.two_m.exceptions import *
+from two_m.dill.serde import DillSerde
+from two_m.datatype import LinkedList, LinkedListItem
+from two_m.database.postgres.exceptions import DatabaseException
+from two_m.conf import RESERVED_WORDS, CustomModel
 
 
 class ORMAttributes:

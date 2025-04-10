@@ -1,14 +1,6 @@
 """
 Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 Файл для развёртывания пакетов в рабочем каталоге целевого проекта.
-Данный модуль следует запускать посредством CLI:
-1) Активируем виртуальное окружение, если таковое в вашем проекте предусмотрено, иначе используем общесистемный подход
-2) Переходим в рабочий каталог проекта
-    Например: cd my_project
-3) import two_m
-3) Запускаем данный модуль через python
-    Например: c:/my_project/my_app> python3 two_m.install
-Теперь можно писать свои модели и хранимые процедуры в models и procedures соответственно
 """
 import os
 import time
@@ -20,23 +12,48 @@ import typing
 from subprocess import CompletedProcess
 
 
+def main():
+    if not check_items_is_exist(MODULE_URL):
+        raise RuntimeError('Не удалось инициализировать установку')
+    if not check_items_is_exist(TEMPLATES_URL):
+        raise RuntimeError('Не найдены пакеты для распаковки')
+    check_python_version()
+    print("1/4 -- OK check Python Ver")
+    install_requirements()
+    print("2/4 -- OK install requirements")
+    check_requirements()
+    print("3/4 -- OK check exists requirements")
+    copy_items()
+    print("4/4 -- OK copy files")
+    print("Success")
+
+
 def get_app_path():
-    return importlib.import_module(MODULE_NAME).__file__
+    def remove_init_py(full_path: str):
+        arr = full_path.split(os.path.sep)
+        if "__init__.py" in arr:
+            arr.remove("__init__.py")
+        return f"{os.path.sep}".join(arr)
+    return remove_init_py(importlib.import_module(MODULE_NAME).__file__)
 
 
 def read_requirements() -> list[str]:
+    def filter_empty_line(elems):
+        if "" in elems:
+            elems.remove("")
+        return elems
     file_ = open(os.path.join(MODULE_URL, REQUIREMENTS_TXT_PATH))
     t = file_.read()
     file_.close()
-    return t.split("\r\n")
+    return filter_empty_line(t.split("\n"))
 
 
 MODULE_NAME = 'two_m'
 MODULE_URL = os.path.abspath(get_app_path())
 TEMPLATES_ROOT = '/templates/'  # Пакет с модулями, которые должны распаковаться в пользовательское приложение
-REQUIREMENTS_TXT_PATH = 'requirements.txt'
-TEMPLATES_URL = os.path.join(MODULE_URL, TEMPLATES_ROOT)
-REQUIRED_PYTHON_VERSION = '3.7'
+REQUIREMENTS_TXT_PATH = 'install/requirements.txt'
+TEMPLATES_URL = f"{MODULE_URL}{os.path.sep}{TEMPLATES_ROOT}{os.path.sep}"
+REQUIRED_PYTHON_VERSION = '3.8'
 INSTALLATION_PATH = os.path.abspath(os.getcwd())
 REQUIREMENTS_LIST = read_requirements()
 MAX_RETRIES_CHECK_REQUIREMENTS = 10
@@ -70,9 +87,9 @@ def check_requirements():
         time.sleep(DELAY_SEC_RETRY_CHECK_REQUIREMENTS)
         return is_success(data, counter=counter + 1)
 
-    def check_not_installed_package_names(names: typing.Iterable):
-        return frozenset(map(lambda x: x.split('==')[0], REQUIREMENTS_LIST)) - \
-               frozenset(map(lambda x: x.split('==')[0], names))
+    def check_not_installed_package_names(exists_package_names: typing.Iterable):
+        return frozenset(map(lambda x: x.split('==')[0], REQUIREMENTS_LIST)).issubset( \
+               frozenset(map(lambda x: x.split('==')[0], exists_package_names)))
 
     def check_packages_with_out_date_version():
         def is_valid_version(version: str, required_version: str):
@@ -108,23 +125,10 @@ def check_requirements():
 
 
 def copy_items():
-    root_path = os.path.join(os.getcwd(), "two_m")
-    os.mkdir(root_path)
-    shutil.copytree(TEMPLATES_URL, os.path.join(os.getcwd(), "two_m"),
+    target_path = f"{os.getcwd()}{os.path.sep}{MODULE_NAME}"
+    shutil.copytree(TEMPLATES_URL, f"{target_path}{os.path.sep}",
                     ignore=shutil.ignore_patterns('*.pyc', 'tmp*'))
 
 
 if __name__ == '__main__':
-    if not check_items_is_exist(MODULE_URL):
-        raise RuntimeError('Не удалось инициализировать установку')
-    if not check_items_is_exist(TEMPLATES_URL):
-        raise RuntimeError('Не найдены пакеты для распаковки')
-    check_python_version()
-    print("1/4 -- OK check Python Ver")
-    install_requirements()
-    print("2/4 -- OK install requirements")
-    check_requirements()
-    print("3/4 -- OK check exists requirements")
-    copy_items()
-    print("4/4 -- OK copy files")
-    print("Success")
+    main()
