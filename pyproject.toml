@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 license = "GNU"
 [project]
 name = "2m"
-version = "1.1.3"
+version = "1.1.5"
 authors = [
   { name="Victor Litovchenko", email="filpsixi@mail.ru" },
 ]
@@ -29,11 +29,10 @@ dependencies = [
     'dill==0.3.9',
     'psycopg2==2.9.3'
 ]
-[tool.setuptools]
-packages = ["two_m_root"]
+[tool.setuptools.packages]
+find = {namespaces = false}
 [tool.setuptools.package-data]
-"two_m_root.install" = ["*.txt"]
-"two_m_root.templates" = ["*.env"]
+two_m_root = ["install/*.txt", "templates/*.env"]
 [project.urls]
 Homepage = "https://github.com/filthps/2m"
 Issues = "https://github.com/filthps/2m/issues"
