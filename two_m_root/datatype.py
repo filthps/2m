@@ -5,7 +5,6 @@ from typing import Optional, Iterable, Union, Any, Iterator
 
 
 class LinkedListItem:
-
     def __init__(self, **values):
         self._val = values
         self._index = 0

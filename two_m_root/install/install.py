@@ -48,7 +48,8 @@ def read_requirements() -> list[str]:
     return filter_empty_line(t.split("\n"))
 
 
-MODULE_NAME = 'two_m'
+MODULE_NAME = "two_m_root"
+PACKAGE_NAME = 'two_m'  # Название пакета, который появится у юзера в рабочем каталоге
 MODULE_URL = os.path.abspath(get_app_path())
 TEMPLATES_ROOT = '/templates/'  # Пакет с модулями, которые должны распаковаться в пользовательское приложение
 REQUIREMENTS_TXT_PATH = 'install/requirements.txt'
@@ -88,7 +89,7 @@ def check_requirements():
         return is_success(data, counter=counter + 1)
 
     def check_not_installed_package_names(exists_package_names: typing.Iterable):
-        return frozenset(map(lambda x: x.split('==')[0], REQUIREMENTS_LIST)).issubset( \
+        return frozenset(map(lambda x: x.split('==')[0], REQUIREMENTS_LIST)).issubset(
                frozenset(map(lambda x: x.split('==')[0], exists_package_names)))
 
     def check_packages_with_out_date_version():
@@ -125,7 +126,7 @@ def check_requirements():
 
 
 def copy_items():
-    target_path = f"{os.getcwd()}{os.path.sep}{MODULE_NAME}"
+    target_path = f"{os.getcwd()}{os.path.sep}{PACKAGE_NAME}"
     shutil.copytree(TEMPLATES_URL, f"{target_path}{os.path.sep}",
                     ignore=shutil.ignore_patterns('*.pyc', 'tmp*'))
 

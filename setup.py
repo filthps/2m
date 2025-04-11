@@ -25,7 +25,8 @@ if __name__ == "__main__":
             'python-dotenv==0.20.0',
             'SQLAlchemy==2.0.28',
             'SQLAlchemy-Utils==0.38.2',
-            'dill==0.3.9'
+            'dill==0.3.9',
+            'psycopg2==2.9.3'
         ],
         classifiers=[
             'Programming Language :: Python :: 3.8'
