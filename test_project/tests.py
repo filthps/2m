@@ -938,17 +938,17 @@ class TestResultPointer(unittest.TestCase, SetUp):
         self.set_data_into_queue()
         result = self.orm_manager.get_items(Machine)
         with self.assertRaises(PointerRepeatedWrapper):
-            result.pointer = tuple(repeat("any_str", 10))  # 1 или более повторяющихся элементов обёртки
+            result.pointer = list(repeat("any_str", 10))  # 1 или более повторяющихся элементов обёртки
         with self.assertRaises(PointerRepeatedWrapper):
-            result.pointer = tuple(repeat("r", 2))  # 1 или более повторяющихся элементов обёртки
+            result.pointer = list(repeat("r", 2))  # 1 или более повторяющихся элементов обёртки
         with self.assertRaises(PointerRepeatedWrapper):
-            result.pointer = tuple(repeat("any_s", 4))  # 1 или более повторяющихся элементов обёртки
+            result.pointer = list(repeat("any_s", 4))  # 1 или более повторяющихся элементов обёртки
         with self.assertRaises(PointerWrapperLengthError):
-            result.pointer = ("Станок 1", "Станок 2", "Станок 3", "Станок 4", "Станка 5 нету этот лишний")
+            result.pointer = ["Станок 1", "Станок 2", "Станок 3", "Станок 4", "Станка 5 нету этот лишний"]
         with self.assertRaises(PointerWrapperLengthError):
-            result.pointer = ("Станок 1", "Станок 2")  # Не хватает 2 элементов в списке!
+            result.pointer = ["Станок 1", "Станок 2"]  # Не хватает 2 элементов в списке!
         with self.assertRaises(PointerWrapperLengthError):
-            result.pointer = tuple()
+            result.pointer = list()
         with self.assertRaises(PointerWrapperTypeError):
             result.pointer = ""
         with self.assertRaises(PointerWrapperTypeError):
@@ -957,10 +957,10 @@ class TestResultPointer(unittest.TestCase, SetUp):
             result.pointer = b"st"
         with self.assertRaises(PointerWrapperTypeError):
             result.pointer = 0
-        result.pointer = ("Станок 1", "Станок 2", "Станок 3", "Станок 4")  # GOOD Теперь
+        result.pointer = ["Станок 1", "Станок 2", "Станок 3", "Станок 4"]  # GOOD Теперь
         # До тех пор, пока не появятся новые записи, или, пока не удалится одна/несколько/все из текущих,
         # Есть возможность удобного обращения через __getitem__!
-        self.assertEqual(result.pointer.wrap_items, ("Станок 1", "Станок 2", "Станок 3", "Станок 4"))
+        self.assertEqual(result.pointer.wrap_items, ["Станок 1", "Станок 2", "Станок 3", "Станок 4"])
         self.assertIsInstance(result.pointer.items, dict)
         self.assertEqual(4, result.pointer.items.__len__())
         #
@@ -996,7 +996,7 @@ class TestResultPointer(unittest.TestCase, SetUp):
         # С ним покончено((((
         # К счастью, текущий экземпляр result может получить новый pointer!, для этого
         # Нужно снова ассоциировать с сеттером pointer правильный кортеж(по длине) и содержимому без повторений
-        result.pointer = ("Станок 1", "Станок 2", "Станок 3", "Станок 4", "Станок 5")
+        result.pointer = ["Станок 1", "Станок 2", "Станок 3", "Станок 4", "Станок 5"]
         self.assertEqual(result.pointer["Станок 5"]["machinename"], "somenewmachinename")
 
     @drop_cache
@@ -1009,11 +1009,11 @@ class TestResultPointer(unittest.TestCase, SetUp):
         self.set_data_into_database()
         self.set_data_into_queue()
         result = self.orm_manager.join_select(Machine, Cnc, _on={"Machine.cncid": "Cnc.cncid"})
-        result.pointer = ("Результат в списке 1", "Результат в списке 2")
+        result.pointer = ["Результат в списке 1", "Результат в списке 2"]
         #
         # Тест wrap_items
         #
-        self.assertEqual(result.pointer.wrap_items, ("Результат в списке 1", "Результат в списке 2"))
+        self.assertEqual(result.pointer.wrap_items, ["Результат в списке 1", "Результат в списке 2"])
         #
         #  Тестировать refresh
         #

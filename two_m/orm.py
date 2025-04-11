@@ -294,12 +294,12 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
                  _model=None, _where=None, _create_at=None,
                  **kw):
         """
-            :arg _model: Расширенный клас model SQLAlchemy
-            :arg _insert: Опицонально bool
-            :arg _update: Опицонально bool
-            :arg _delete: Опицонально bool
-            :arg _ready: Если __delete=True - Необязательный
-            :arg _where: Опицонально dict
+            :param _model: Расширенный клас model SQLAlchemy
+            :param _insert: Опицонально bool
+            :param _update: Опицонально bool
+            :param _delete: Опицонально bool
+            :param _ready: Если __delete=True - Необязательный
+            :param _where: Опицонально dict
             Все остальные параметры являются парами 'поле-значение'
             """
         self._is_valid_container(_container)
@@ -843,10 +843,10 @@ class Queue(LinkedList, QueueSearchTools):
                      **_filter: dict[str, Union[str, int, Literal["*"]]]) -> "Queue":  # O(n)
         """
         Искать ноды по совпадениям любых полей.
-        :arg model: кастомный объект, смотри модуль database/models
-        :arg _filter: словарь содержащий набор полей и их значений для поиска, вместо значений допустим знак '*',
+        :param model: кастомный объект, смотри модуль database/models
+        :param _filter: словарь содержащий набор полей и их значений для поиска, вместо значений допустим знак '*',
         который будет засчитывать любые значения у полей.
-        :arg negative_selection: режим отбора нод (найти ноды КРОМЕ ... [filter])
+        :param negative_selection: режим отбора нод (найти ноды КРОМЕ ... [filter])
         """
         QueueItem.is_valid_model_instance(model)
         items = self.__class__()
@@ -882,8 +882,8 @@ class Queue(LinkedList, QueueSearchTools):
     def get_node(self, model: CustomModel, **primary_key_data) -> Optional[QueueItem]:
         """
         Данный метод используется при инициализации - _replication
-        :arg model: объект модели
-        :arg primary_key_data: словарь вида - {имя_первичного_ключа: значение}
+        :param model: объект модели
+        :param primary_key_data: словарь вида - {имя_первичного_ключа: значение}
         """
         QueueItem.is_valid_model_instance(model)
         if not len(primary_key_data) == 1:
@@ -2057,8 +2057,8 @@ class Main(ORMAttributes):
     @classmethod
     def get_node_dml_type(cls, node_pk_value: Union[str, int], model=None) -> Optional[str]:
         """ Получить тип операции с базой, например '_update', по названию ноды, если она найдена, иначе - None
-        :arg node_pk_value: значение поля первичного ключа
-        :arg model: кастомный объект, смотри модуль database/models
+        :param node_pk_value: значение поля первичного ключа
+        :param model: кастомный объект, смотри модуль database/models
         """
         model = model or cls._model_obj
         cls.is_valid_model_instance(model)
@@ -2072,8 +2072,8 @@ class Main(ORMAttributes):
     def remove_items(cls, node_or_nodes: Union[Union[int, str], Iterable[Union[str, int]]], model=None):
         """
         Удалить ноду из очереди на сохранение
-        :arg node_or_nodes: значение для поля первичного ключа, одно или несколько
-        :arg model: кастомный объект, смотри модуль database/models
+        :param node_or_nodes: значение для поля первичного ключа, одно или несколько
+        :param model: кастомный объект, смотри модуль database/models
         """
         model = model or cls._model_obj
         cls.is_valid_model_instance(model)
@@ -2258,7 +2258,7 @@ class ResultCacheTools(Main):
         self.__is_valid_nodes(nodes)
         self.cache.set(f"{self.__key}-pk", set(map(str, map(lambda x: x.hash_by_pk, nodes))))
 
-    def _get_primary_keys(self) -> set[str]:
+    def _get_primary_keys_hash(self) -> set[str]:
         return self.cache.get(f"{self.__key}-pk", set())
 
     def __get_all_nodes_has_been_in_result(self) -> set:
@@ -2305,7 +2305,7 @@ class BaseResult(ABC, ResultCacheTools):
 
     def has_changes(self, hash_value=None) -> Optional[Union[bool, ValueError]]:
         """ Изменились ли значения в результатах с момента последнего запроса has_changes.
-        :arg hash_value: Если передан, то будет проверяться 1 конкретный результат из всей коллекции результатов
+        :param hash_value: Если передан, то будет проверяться 1 конкретный результат из всей коллекции результатов
         Например в случае,
         когда has_changes запрашивается впервые, или, когда, просто напросто, кеш не помнит данных о "прошлых" результатов.
         """
@@ -2335,7 +2335,7 @@ class BaseResult(ABC, ResultCacheTools):
 
     def has_new_entries(self) -> bool:
         nodes = self.items
-        status = not (self._get_primary_keys() == set(map(str, map(lambda v: v.hash_by_pk, nodes))))
+        status = not (self._get_primary_keys_hash() == set(map(str, map(lambda v: v.hash_by_pk, nodes))))
         self._set_primary_keys(nodes)
         return status
 
@@ -2350,7 +2350,7 @@ class BaseResult(ABC, ResultCacheTools):
         return ref(self._pointer)()
 
     @pointer.setter
-    def pointer(self: Union["Result", "JoinSelectResult"], wrap_items: tuple):
+    def pointer(self: Union["Result", "JoinSelectResult"], wrap_items: list):
         items = self.items
         self._save_result_collection(items)
         self._set_hash(items)
@@ -2686,13 +2686,13 @@ class PointerCacheTools(Main):
             all_items[index] = item_str
         self.cache.set(self.__cache_key, ",".join(all_items))
 
-    def _get_primary_keys(self) -> Iterator[str]:
+    def _get_primary_keys_hash(self) -> Iterator[str]:
         return self.__parse_cache_items(1)
 
-    def _get_hash_sum(self):
+    def _get_hash_sum(self) -> Iterator[str]:
         return self.__parse_cache_items(2)
 
-    def _get_wrappers(self):
+    def _get_wrappers(self) -> Iterator[str]:
         return self.__parse_cache_items(0)
 
     def __parse_cache_items(self, val_index):
@@ -2717,7 +2717,7 @@ class Pointer(PointerCacheTools):
     по сравнению с предыдущим взаимодействием [с данным экземпляром], то он становится бесполезен
     и требуется создание нового объекта, с новым списком wrap_items.
     """
-    def __init__(self, result_item: Union[Result, JoinSelectResult], wrap_items: tuple[str]):
+    def __init__(self, result_item: Union[Result, JoinSelectResult], wrap_items: list[str]):
         self._id = str(uuid.uuid4())
         self._result_item = result_item
         self._wrap_items = wrap_items
@@ -2727,9 +2727,9 @@ class Pointer(PointerCacheTools):
         self._set_pointer_configuration(self.__create_cache_data())
 
     @property
-    def wrap_items(self):
+    def wrap_items(self) -> list[str]:
         if not self._is_valid():
-            return tuple()
+            return list()
         return copy.copy(self._wrap_items)
 
     @property
@@ -2744,9 +2744,9 @@ class Pointer(PointerCacheTools):
     def is_valid(self):
         return self._is_valid()
 
-    def has_changes(self, name: str) -> Optional[Union[bool, Type[Exception]]]:
+    def has_changes(self, name: str) -> Optional[Union[bool, Exception]]:
         """ Получить статус состояния результатов, на которые ранее был задан экземпляр Pointer.
-         :arg name: имя одного конкретного результата, одно из многих, которые хранятся в wrap_items
+         :param name: имя одного конкретного результата, одно из многих, которые хранятся в wrap_items
          Например в случае,
          когда has_changes запрашивается впервые, или, когда, просто напросто, кеш не помнит данных о "прошлых" результатов.
          """
@@ -2766,6 +2766,56 @@ class Pointer(PointerCacheTools):
         index = list(self._get_wrappers()).index(name)
         self._replace_pointer_cache_item(actual_primary_keys_hash[index], str([hash(n) for n in result][index]))
         return self._result_item.has_changes(hash_value=current_hash_sum[index])
+
+    def replace_wrap(self, item: str, old_wrapper: Optional[str] = None, hash_: Optional[int] = None,
+                     primary_key_hash: Optional[int] = None, index: Optional[int] = None):
+        """
+        Установить новый строковой эквивалент записи взамен старой.
+        :param item: Новая строка
+        :param old_wrapper: Старая строка из wrap_items
+        :param hash_: Полная хеш сумма результата, у которой следует заменить строку-указатель
+        :param primary_key_hash: Хеш-сумма первичного ключа и значения результата, у которого следует заменить строку-указатель
+        :param index: Индекс записи в результате, у которой следует заменить строку-указатель
+        :return: None
+        """
+        if type(item) is not str:
+            raise TypeError
+        if not item:
+            raise ValueError
+        if not sum((bool(old_wrapper), bool(hash_), bool(primary_key_hash), bool(index),)) == 1:
+            raise ValueError
+        if old_wrapper is not None:
+            if type(old_wrapper) is not str:
+                raise TypeError
+        if hash_ is not None:
+            if not isinstance(hash_, int):
+                raise TypeError
+        if primary_key_hash is not None:
+            if type(primary_key_hash) is not int:
+                raise TypeError
+        if index is not None:
+            if not isinstance(index, int):
+                raise TypeError
+        if index is not None:
+            if index < 0:
+                index = len(self._wrap_items) - index
+            if len(self._wrap_items) - 1 < index:
+                return
+            self._wrap_items[index] = item
+        if hash_ is not None:
+            current_hash = tuple(map(int, self._get_hash_sum()))
+            if hash_ not in current_hash:
+                return
+            self._wrap_items[current_hash.index(hash_)] = item
+        if primary_key_hash is not None:
+            current_pk_hash = tuple(map(int, self._get_primary_keys_hash()))
+            if primary_key_hash not in current_pk_hash:
+                return
+            self._wrap_items[current_pk_hash.index(primary_key_hash)] = item
+        if old_wrapper is not None:
+            if old_wrapper not in self._wrap_items:
+                return
+            self._wrap_items[self._wrap_items.index(old_wrapper)] = item
 
     def __getitem__(self, item: str) -> Optional[Union[ResultORMItem, ResultORMCollection]]:
         data = tuple(self._select_result_getter())
@@ -2812,7 +2862,7 @@ class Pointer(PointerCacheTools):
             if actual_primary_key_hash is None:
                 actual_primary_key_hash = [str(node_or_group.hash_by_pk) for node_or_group in self._select_result_getter()]
             if old_primary_key_hash is None:
-                old_primary_key_hash = list(self._get_primary_keys())
+                old_primary_key_hash = list(self._get_primary_keys_hash())
             if type(actual_primary_key_hash) is not list:
                 raise TypeError
             if type(old_primary_key_hash) is not list:
@@ -2832,7 +2882,7 @@ class Pointer(PointerCacheTools):
     def _select_result_getter(self) -> Iterator[ResultORMCollection]:
         """ Порядок получаемых с запроса нод мог измениться.
          Отсортируем ноды по порядку первичных ключей, которые были записаны в кеш при инициализации"""
-        cached_primary_keys = tuple(self._get_primary_keys())
+        cached_primary_keys = tuple(self._get_primary_keys_hash())
         node_items = self._result_item.items
         if not cached_primary_keys:
             for n in node_items:
@@ -2847,8 +2897,8 @@ class Pointer(PointerCacheTools):
                 yield node_or_group
 
     def _is_valid_config(self):
-        if type(self._wrap_items) is not tuple:
-            raise PointerWrapperTypeError("В качестве элементов wrapper принимается кортеж строк")
+        if type(self._wrap_items) is not list:
+            raise PointerWrapperTypeError("В качестве элементов wrapper принимается список строк")
         if not all(map(lambda x: isinstance(x, str), self._wrap_items)):
             raise PointerWrapperTypeError
         if not self._wrap_items:
@@ -2859,7 +2909,6 @@ class Pointer(PointerCacheTools):
             )
         if not len(self._wrap_items) == len(set(self._wrap_items)):
             raise PointerRepeatedWrapper
-        t = tuple(self._select_result_getter())
         if not len(tuple(self._select_result_getter())) == self._wrap_items.__len__():
             raise PointerWrapperLengthError
         super()._is_valid_config()
