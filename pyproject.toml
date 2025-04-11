@@ -3,13 +3,13 @@ requires = [
     "setuptools >= 77.0.3"
     ]
 build-backend = "setuptools.build_meta"
+license = "GNU"
 [project]
 name = "2m"
-version = "1.1"
+version = "1.1.3"
 authors = [
   { name="Victor Litovchenko", email="filpsixi@mail.ru" },
 ]
-license = "GNU"
 description = "A small package"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -18,8 +18,22 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 license-files = ["LICENSE.txt"]
+dependencies = [
+    'Flask==3.0.2',
+    'Flask-SQLAlchemy==3.1.1',
+    'importlib-metadata==8.6.1',
+    'pymemcache==4.0.0',
+    'python-dotenv==0.20.0',
+    'SQLAlchemy==2.0.28',
+    'SQLAlchemy-Utils==0.38.2',
+    'dill==0.3.9',
+    'psycopg2==2.9.3'
+]
 [tool.setuptools]
 packages = ["two_m_root"]
+[tool.setuptools.package-data]
+"two_m_root.install" = ["*.txt"]
+"two_m_root.templates" = ["*.env"]
 [project.urls]
 Homepage = "https://github.com/filthps/2m"
 Issues = "https://github.com/filthps/2m/issues"
