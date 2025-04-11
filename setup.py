@@ -9,7 +9,7 @@ def readme():
 if __name__ == "__main__":
     setup(
         name='2m',
-        version='1.0.22',
+        version='1.1',
         author='Victor Litovchenko',
         author_email='filpsixi@mail.ru',
         description='This is my first module',
