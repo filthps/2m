@@ -21,7 +21,7 @@
 
 Устанавливаем зависимые пакеты, сверяем соответствие, развёртываем пакет с модулями:
 
-<code>> python -c "from two_m.install import install;exec(install.main())"</code>
+<code>> python -c "from two_m_root.install import install;exec(install.main())"</code>
 
 ![install](readme_images/install.png)
 

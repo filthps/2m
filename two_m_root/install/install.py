@@ -51,9 +51,8 @@ def read_requirements() -> list[str]:
 MODULE_NAME = "two_m_root"
 PACKAGE_NAME = 'two_m'  # Название пакета, который появится у юзера в рабочем каталоге
 MODULE_URL = os.path.abspath(get_app_path())
-TEMPLATES_ROOT = '/templates/'  # Пакет с модулями, которые должны распаковаться в пользовательское приложение
-REQUIREMENTS_TXT_PATH = 'install/requirements.txt'
-TEMPLATES_URL = f"{MODULE_URL}{os.path.sep}{TEMPLATES_ROOT}{os.path.sep}"
+REQUIREMENTS_TXT_PATH = f'install{os.path.sep}requirements.txt'
+TEMPLATES_URL = f"{MODULE_URL}{os.path.sep}templates{os.path.sep}"  # Пакет с модулями, которые должны распаковаться в пользовательское приложение
 REQUIRED_PYTHON_VERSION = '3.8'
 INSTALLATION_PATH = os.path.abspath(os.getcwd())
 REQUIREMENTS_LIST = read_requirements()
