@@ -6,8 +6,8 @@ from flask import Flask
 from sqlalchemy import String, Integer, Column, ForeignKey, Boolean, SmallInteger, Text, CheckConstraint
 from sqlalchemy.orm import relationship
 from flask_sqlalchemy import SQLAlchemy as FlaskSQLAlchemy
-from two_m.conf import GlobalFields
-from two_m.flasksqlalchemy.adapter import ModelController
+from two_m_root.conf import GlobalFields
+from two_m_root.flasksqlalchemy.adapter import ModelController
 
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "settings.env"))

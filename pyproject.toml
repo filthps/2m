@@ -19,7 +19,7 @@ classifiers = [
 ]
 license-files = ["LICENSE.txt"]
 [tool.setuptools]
-packages = ["two_m"]
+packages = ["two_m_root"]
 [project.urls]
 Homepage = "https://github.com/filthps/2m"
 Issues = "https://github.com/filthps/2m/issues"

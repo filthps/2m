@@ -3,12 +3,13 @@ Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 Адаптер для flask-sqlalchemy https://flask-sqlalchemy.readthedocs.io
 """
 from sqlalchemy.orm import InstrumentedAttribute
-from two_m.conf import RESERVED_WORDS, AbstractModelController
+from two_m_root.conf import RESERVED_WORDS, AbstractModelController
 
 
 class ModelController(AbstractModelController):
     __table__ = ...
     column_names = ...
+    foreign_keys = ...
 
     def __new__(cls, **k):
         cls.column_names = {}  # Если база данных инициализирована вручную, средствами sql,

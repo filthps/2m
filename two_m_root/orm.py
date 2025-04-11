@@ -34,11 +34,11 @@ from sqlalchemy.sql.dml import Insert, Update, Delete
 from sqlalchemy.sql.expression import select
 from sqlalchemy.orm import Query, sessionmaker as session_factory, Session, scoped_session
 from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
-from two_m.dill.serde import DillSerde
-from two_m.datatype import LinkedList, LinkedListItem
-from two_m.exceptions import *
-from two_m.database.postgres.exceptions import DatabaseException
-from two_m.conf import RESERVED_WORDS, CustomModel
+from two_m_root.dill.serde import DillSerde
+from two_m_root.datatype import LinkedList, LinkedListItem
+from two_m_root.exceptions import *
+from two_m_root.database.postgres.exceptions import DatabaseException
+from two_m_root.conf import RESERVED_WORDS, CustomModel
 
 
 class ORMAttributes:
@@ -1735,10 +1735,8 @@ class Main(ORMAttributes):
     """
     CACHE_PATH = ...
     DATABASE_PATH = ...
-    RELEASE_INTERVAL_SECONDS = 5.0
-    RELEASE_INTERVAL_SECONDS_DEBUG = 0.5
-    CACHE_LIFETIME_HOURS = 6 * 60 * 60
-    JOIN_SELECT_DIFF_CACHE_MINUTES = 8 * 60
+    RELEASE_INTERVAL_SECONDS = ...
+    CACHE_LIFETIME_HOURS = ...
     _memcache_connection: Optional[Client] = None
     _database_session = None
     _timer: Optional[threading.Timer] = None
