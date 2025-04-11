@@ -6,8 +6,8 @@ from sqlalchemy import text, select
 from dotenv import load_dotenv
 from procedures import init_all_triggers
 from models import *
-from two_m.orm import *
-from two_m.exceptions import *
+from two_m_root.orm import *
+from two_m_root.exceptions import *
 from main import ORM
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "settings.env"))
