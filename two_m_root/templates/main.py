@@ -1,18 +1,22 @@
 """
 Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
-Это главный модуль. Класс ORM следует использовать в ваших проектах
 """
 import os
+import typing
 from dotenv import load_dotenv
-from two_m_root.orm import Main
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "settings.env"))
 DATABASE_PATH = os.environ.get("DATABASE_PATH")
 MEMCACHE_PATH = os.environ.get("CACHE_PATH")
-
-
-class ORM(Main):
-    CACHE_PATH = MEMCACHE_PATH
-    DATABASE_PATH = DATABASE_PATH
-    RELEASE_INTERVAL_SECONDS = 5.0
-    CACHE_LIFETIME_HOURS = 1 * 60 * 60
+# Далее константы классов
+# Tool
+RELEASE_INTERVAL_SECONDS: float = 5.0
+CACHE_LIFETIME_HOURS: int = 1 * 60 * 60
+RETRYING_CLIENT_ATTEMPTS: int = 10
+RETRYING_CLIENT_RETRY_DELAY: float = 0.3
+# SQLAlchemyQueryManager
+MAX_RETRIES: typing.Union[int, typing.Literal["no-limit"]] = "no-limit"
+# ResultORMCollection
+ADD_TABLE_NAME_PREFIX: typing.Literal["auto", "add", "no-prefix"] = "auto"
+# PointerCacheTools
+WRAP_ITEM_MAX_LENGTH = 30

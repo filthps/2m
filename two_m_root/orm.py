@@ -28,6 +28,7 @@ from weakref import ref, ReferenceType
 from typing import Union, Iterator, Iterable, Optional, Literal, Type, Any
 from collections import ChainMap
 from pymemcache.client.base import Client
+from pymemcache.client.retrying import RetryingClient
 from pymemcache.exceptions import MemcacheError
 from sqlalchemy import create_engine, delete, insert, text
 from sqlalchemy.sql.dml import Insert, Update, Delete
@@ -39,6 +40,8 @@ from two_m_root.datatype import LinkedList, LinkedListItem
 from two_m_root.exceptions import *
 from two_m_root.database.postgres.exceptions import DatabaseException
 from two_m_root.conf import RESERVED_WORDS, CustomModel
+from two_m.main import MEMCACHE_PATH, DATABASE_PATH, RELEASE_INTERVAL_SECONDS, CACHE_LIFETIME_HOURS, \
+    MAX_RETRIES, WRAP_ITEM_MAX_LENGTH, ADD_TABLE_NAME_PREFIX, RETRYING_CLIENT_ATTEMPTS, RETRYING_CLIENT_RETRY_DELAY  # from user's package
 
 
 class ORMAttributes:
@@ -236,7 +239,7 @@ class ModelTools(ORMAttributes):
         if not unique_columns:
             return
         unique_data = {key: node.value[key] for key in node.value if key in unique_columns}
-        select_result = Main.database.query(node.model).filter_by(**unique_data).all()
+        select_result = Tool.database.query(node.model).filter_by(**unique_data).all()
         if not select_result:
             return
         pk = cls.get_primary_key_column_name(node.model)
@@ -450,7 +453,7 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
         if self.__insert:
             query = insert(self.model).values(**value)
         if self.__update or self.__delete:
-            query = Main.database.query(self.model).filter_by(**where).first()
+            query = Tool.database.query(self.model).filter_by(**where).first()
             if query is not None:
                 if self.__update:
                     [setattr(query, key, value) for key, value in value.items()]
@@ -517,7 +520,7 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
     def _field_names_validation(self, from_polymorphizm=False) -> Optional[set[str]]:
         """ соотнести все столбцы ноды в словаре value со столбцами из класса Model """
         def clear_names():
-            """ ORM могла добавить префиксы вида 'ModelClassName.column_name', очистить имена от них """
+            """ Tool могла добавить префиксы вида 'ModelClassName.column_name', очистить имена от них """
             value = (k[k.index(".") + 1:] if "." in k else k for k in self.value)
             return value
         for name in clear_names():
@@ -554,12 +557,12 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
             node = QueueSearchTools.get_node_by_unique_fields(self.container, self)
             if node is not None:
                 return node.get_primary_key_and_value()
-            single_items_from_cache = Main.cache.get(Result.RESULT_CACHE_KEY,
+            single_items_from_cache = Tool.cache.get(Result.RESULT_CACHE_KEY,
                                                           ResultORMCollection())
             node = QueueSearchTools.get_node_by_unique_fields(single_items_from_cache, self)
             if node is not None:
                 return node.get_primary_key_and_value()
-            multiple_items_from_cache = Main.cache.get(JoinSelectResult.RESULT_CACHE_KEY,
+            multiple_items_from_cache = Tool.cache.get(JoinSelectResult.RESULT_CACHE_KEY,
                                                             [ResultORMCollection()])
             for collection in multiple_items_from_cache:
                 converted = convert_join_select_result_type(collection)
@@ -759,7 +762,7 @@ class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
 class Queue(LinkedList, QueueSearchTools):
     """
     Очередь на основе связанного списка.
-    Управляется через адаптер Main.
+    Управляется через адаптер Tool.
     Класс-контейнер умеет только ставить в очередь ((enqueue) зашита особая логика) и снимать с очереди (dequeue)
     см логику в методе _replication.
     """
@@ -1039,7 +1042,7 @@ class Queue(LinkedList, QueueSearchTools):
 
 class ResultORMCollection:
     """ Иммутабельная коллекция с набором результата, закрытая на добавление новых элементов """
-    ADD_TABLE_NAME_PREFIX: Literal["auto", "add", "no-prefix"] = "auto"
+    ADD_TABLE_NAME_PREFIX: Literal["auto", "add", "no-prefix"] = ADD_TABLE_NAME_PREFIX
 
     def __init__(self, collection: "ServiceOrmContainer" = None, prefix_mode=None):
         def is_valid():
@@ -1448,7 +1451,7 @@ class OrderByMixin(ABC):
         
         
 class OrderBySingleResultMixin(OrderByMixin):
-    """ Реализация для 'одиночного результата',- запрос к одной таблице. См Main.get_items() """
+    """ Реализация для 'одиночного результата',- запрос к одной таблице. См Tool.get_items() """
     def order_by(self, by_column_name: Optional[str] = None, by_primary_key: Optional[bool] = None,
                  by_create_time: Optional[bool] = None, length: bool = False, alphabet: bool = False,
                  decr: bool = False):
@@ -1484,7 +1487,7 @@ class OrderBySingleResultMixin(OrderByMixin):
 
 
 class OrderByJoinResultMixin(OrderByMixin, ModelTools):
-    """ Реализация для запросов с join. См Main.join_select() """
+    """ Реализация для запросов с join. См Tool.join_select() """
     def order_by(self: "JoinSelectResult", model, by_column_name: Optional[str] = None,
                  by_primary_key: Optional[bool] = None,
                  by_create_time: Optional[bool] = None, length: bool = False, alphabet: bool = False,
@@ -1523,7 +1526,7 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
 
 
 class SQLAlchemyQueryManager:
-    MAX_RETRIES: Union[int, Literal["no-limit"]] = "no-limit"
+    MAX_RETRIES: Union[int, Literal["no-limit"]] = MAX_RETRIES
 
     def __init__(self, connection_path: str, nodes: "Queue"):
         def valid_node_type():
@@ -1560,7 +1563,7 @@ class SQLAlchemyQueryManager:
             return
         if not self._query_objects:
             return
-        session = Main.database
+        session = Tool.database
         while sorted_data:
             node_group = sorted_data.pop(-1)
             if not node_group:
@@ -1588,7 +1591,6 @@ class SQLAlchemyQueryManager:
                     print(error)
                     self.remaining_nodes += node_group
             try:
-                print("COMMIT")
                 session.commit()
             except SQLAlchemyError as error:
                 print(error)
@@ -1669,7 +1671,7 @@ class ServiceOrmItem(QueueItem):
 
 
 class ServiceOrmContainer(Queue):
-    """ Данный контейнер для использования в JoinSelectResult (результат вызова Main.join_select) """
+    """ Данный контейнер для использования в JoinSelectResult (результат вызова Tool.join_select) """
     LinkedListItem: Union[ServiceOrmItem, ResultORMItem] = ServiceOrmItem
 
     @property
@@ -1718,11 +1720,11 @@ class NodeTypeConverter:
             raise TypeError
 
 
-class Main(ORMAttributes):
+class Tool(ORMAttributes):
     """
     Главный класс
     1) Инициализация
-        LinkToObj = Main
+        LinkToObj = Tool()
     2) Установка ссылки на класс модели Flask-SqlAlchemy
         LinkToObj.set_model(CustomModel)
     3) Использование
@@ -1733,11 +1735,11 @@ class Main(ORMAttributes):
         в случае неудачи нода переносится в конец очереди
         LinkToObj.remove_items - принудительное изъятие ноды из очереди.
     """
-    CACHE_PATH = ...
-    DATABASE_PATH = ...
-    RELEASE_INTERVAL_SECONDS = ...
-    CACHE_LIFETIME_HOURS = ...
-    _memcache_connection: Optional[Client] = None
+    CACHE_PATH = MEMCACHE_PATH
+    DATABASE_PATH = DATABASE_PATH
+    RELEASE_INTERVAL_SECONDS = RELEASE_INTERVAL_SECONDS
+    CACHE_LIFETIME_HOURS = CACHE_LIFETIME_HOURS
+    _memcache_connection: Optional[RetryingClient] = None
     _database_session = None
     _timer: Optional[threading.Timer] = None
     _model_obj: Optional[Type[CustomModel]] = None  # Текущий класс модели, присваиваемый автоматически всем экземплярам при добавлении в очередь
@@ -1757,13 +1759,12 @@ class Main(ORMAttributes):
     @property
     def cache(cls):
         if cls._memcache_connection is None:
-            try:
-                cls._memcache_connection = Client(cls.CACHE_PATH, serde=DillSerde)
-            except MemcacheError:
-                print("Нет соединения с сервисом кеширования!")
-                raise MemcacheError
-            else:
-                print("Подключение к серверу memcached")
+            cls._memcache_connection = RetryingClient(
+                Client(cls.CACHE_PATH, serde=DillSerde),
+                attempts=RETRYING_CLIENT_ATTEMPTS,
+                retry_delay=RETRYING_CLIENT_RETRY_DELAY,
+                retry_for=[MemcacheError]
+            )
         return cls._memcache_connection
 
     @classmethod
@@ -2162,7 +2163,7 @@ class Main(ORMAttributes):
     def _init_timer(cls):
         timer = threading.Timer(cls.RELEASE_INTERVAL_SECONDS, cls.release)
         timer.daemon = True
-        timer.setName("Main(database push queue)")
+        timer.setName("Tool(database push queue)")
         timer.start()
         return timer
 
@@ -2193,7 +2194,7 @@ class Main(ORMAttributes):
             return {pk: value[pk]}
 
 
-class ResultCacheTools(Main):
+class ResultCacheTools(Tool):
     TEMP_HASH_PREFIX: str = ...
     RESULT_CACHE_KEY: str = ...
     __iter__ = abstractmethod(lambda self: ...)
@@ -2431,7 +2432,7 @@ class BaseResult(ABC, ResultCacheTools):
 
 
 class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
-    """ Экземпляр данного класса возвращается функцией Main.get_items() """
+    """ Экземпляр данного класса возвращается функцией Tool.get_items() """
     RESULT_CACHE_KEY = "simple_result"
     TEMP_HASH_PREFIX = "simple_item_hash"
 
@@ -2462,8 +2463,8 @@ class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
 
 class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
     """
-    Экземпляр этого класса возвращается функцией Main.join_select()
-    1 экземпляр этого класса 1 результат вызова Main.join_select()
+    Экземпляр этого класса возвращается функцией Tool.join_select()
+    1 экземпляр этого класса 1 результат вызова Tool.join_select()
     Использовать следующим образом:
         Делаем join_select
         Результаты можем вывести в какой-нибудь Q...Widget, этот результат (строки) можно привязать к содержимому,
@@ -2639,9 +2640,9 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                 return node
 
 
-class PointerCacheTools(Main):
+class PointerCacheTools(Tool):
     POINTER_CACHE_PREFIX = "p_id"
-    WRAP_ITEM_MAX_LENGTH = 30
+    WRAP_ITEM_MAX_LENGTH = WRAP_ITEM_MAX_LENGTH
 
     def __init__(self, id_: str):
         self._id = id_  # uuid4
@@ -2654,7 +2655,7 @@ class PointerCacheTools(Main):
             if not isinstance(items, (list, tuple, set, frozenset)):
                 raise TypeError
             if not items:
-                raise ValueError
+                return
             for n in items:
                 if type(n) is not str:
                     raise TypeError
@@ -2895,11 +2896,15 @@ class Pointer(PointerCacheTools):
                 yield node_or_group
 
     def _is_valid_config(self):
+        iterable_result = None
         if type(self._wrap_items) is not list:
             raise PointerWrapperTypeError("В качестве элементов wrapper принимается список строк")
         if not all(map(lambda x: isinstance(x, str), self._wrap_items)):
             raise PointerWrapperTypeError
         if not self._wrap_items:
+            iterable_result = tuple(self._select_result_getter())
+            if not iterable_result:
+                return
             raise PointerWrapperLengthError("Контейнер с обёрткой содержимого не может быть пустым")
         if not isinstance(self._result_item, (Result, JoinSelectResult,)):
             raise JoinedItemPointerError(
@@ -2907,7 +2912,8 @@ class Pointer(PointerCacheTools):
             )
         if not len(self._wrap_items) == len(set(self._wrap_items)):
             raise PointerRepeatedWrapper
-        if not len(tuple(self._select_result_getter())) == self._wrap_items.__len__():
+        iterable_result = tuple(self._select_result_getter()) if iterable_result is None else iterable_result
+        if not len(iterable_result) == self._wrap_items.__len__():
             raise PointerWrapperLengthError
         super()._is_valid_config()
 
