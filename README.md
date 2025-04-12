@@ -48,18 +48,18 @@
 
 ![settings](readme_images/settings.png)
 
-* Наконец можно приступить к использованию! Импортируем класс **ORM** и начнём работу!
+* Наконец можно приступить к использованию! Импортируем класс **Tool** и начнём работу!
 
 <code>
 
+    from two_m_root import Tool
     from two_m.models import SomeModel
-    from two_m.main import ORM
     ...
     ...
     ...
     class Something:
         def __init__():
-            self.tool = ORM()
+            self.tool = Tool()
             self.tool.set_model(SomeModel)
     
         def ui_action_a():
@@ -267,3 +267,8 @@
 - Pointer
 
   Добавлен метод *replace_wrap*. *wrap_items* теперь список, а не кортеж.
+  Более мягкое поведение относительно возбуждения *WrapperLengthException*, если данных нет.
+  *pymemcache.RetryingClient* вместо *pymemcache.Client* в свойстве Tool.cache.
+
+  Отказ от идеи наследования класса *Tool* в пользовательский пакет *two_m*, модуль *main*.
+  Напротив, из *two_m.main* теперь импортируются константы в *two_m_root.orm*.
