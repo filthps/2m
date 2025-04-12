@@ -8,7 +8,6 @@ from procedures import init_all_triggers
 from models import *
 from two_m_root.orm import *
 from two_m_root.exceptions import *
-from main import ORM
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "settings.env"))
 CACHE_PATH = os.environ.get("CACHE_PATH")
@@ -40,7 +39,7 @@ def is_database_empty(session, empty=True, tables=15, procedures=52, test_db_nam
 
 
 def db_reinit(m):
-    def wrap(self: "TestORMHelper"):
+    def wrap(self: "TestToolHelper"):
         drop_db()
         if is_database_empty(self.orm_manager.database):
             create_db()
@@ -51,14 +50,14 @@ def db_reinit(m):
 
 
 def drop_cache(callable_):
-    def w(self: "TestORMHelper"):
+    def w(self: "TestToolHelper"):
         self.orm_manager.drop_cache()
         return callable_(self)
     return w
 
 
 class SetUp:
-    orm_manager: Optional[ORM] = None
+    orm_manager: Optional[Tool] = None
 
     def set_data_into_database(self):
         """
@@ -267,10 +266,10 @@ class TestLinkedList(unittest.TestCase):
         self.assertEqual(linked_list[-1].value, {"new_value1_after_append": 100})
 
 
-class TestORMItemQueue(unittest.TestCase):
+class TestToolItemQueue(unittest.TestCase):
     def setUp(self) -> None:
-        Main.CACHE_PATH = CACHE_PATH
-        Main.DATABASE_PATH = DATABASE_PATH
+        Tool.CACHE_PATH = CACHE_PATH
+        Tool.DATABASE_PATH = DATABASE_PATH
 
     def test_init(self):
         Queue()
@@ -433,10 +432,10 @@ class TestORMItemQueue(unittest.TestCase):
         self.assertEqual(0, len(queue))
 
 
-class TestResultORMCollection(unittest.TestCase):
+class TestResultToolCollection(unittest.TestCase):
     def setUp(self) -> None:
-        Main.CACHE_PATH = CACHE_PATH
-        Main.DATABASE_PATH = DATABASE_PATH
+        Tool.CACHE_PATH = CACHE_PATH
+        Tool.DATABASE_PATH = DATABASE_PATH
         queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
@@ -449,7 +448,7 @@ class TestResultORMCollection(unittest.TestCase):
                         "_primary_key_from_ui": False, "machinename": "NewTest"
                         }]
         [queue.enqueue(**item) for item in data__len_3]
-        self.result_collection = ResultORMCollection(queue)
+        self.result_collection = ResultToolCollection(queue)
 
     def test_result_orm_collection(self):
         self.assertEqual(self.result_collection.__len__(), 3)
@@ -467,7 +466,7 @@ class TestResultORMCollection(unittest.TestCase):
                         "_primary_key_from_ui": False, "machinename": "NewTgest"
                         }]
         [queue.enqueue(**item) for item in changed_data__len_3]
-        result_queue = ResultORMCollection(queue)
+        result_queue = ResultToolCollection(queue)
         self.assertEqual(result_queue.__len__(), 3)
         self.assertTrue(result_queue)
         self.assertEqual(3, len(result_queue))
@@ -507,7 +506,7 @@ class TestResultORMCollection(unittest.TestCase):
                  "_create_at": datetime.datetime.now(), "_container": queue, "_insert": True}
                 ]
         [queue.enqueue(**n) for n in data]
-        self.result_collection = ResultORMCollection(queue)
+        self.result_collection = ResultToolCollection(queue)
         self.result_collection.auto_model_prefix()
         self.assertEqual("auto", self.result_collection.prefix)
         # Столбец cncid встречается в обеих нодах, должно произойти добавление префикса с названием таблицы
@@ -517,13 +516,13 @@ class TestResultORMCollection(unittest.TestCase):
         self.assertIn("Replace.replaceid", self.result_collection[3].value)
 
 
-class TestORMHelper(unittest.TestCase, SetUp):
+class TestToolHelper(unittest.TestCase, SetUp):
     def setUp(self) -> None:
-        Main.TESTING = True
-        Main.CACHE_LIFETIME_HOURS = 60
-        Main.CACHE_PATH = CACHE_PATH
-        Main.DATABASE_PATH = DATABASE_PATH
-        self.orm_manager = Main()
+        Tool.TESTING = True
+        Tool.CACHE_LIFETIME_HOURS = 60
+        Tool.CACHE_PATH = CACHE_PATH
+        Tool.DATABASE_PATH = DATABASE_PATH
+        self.orm_manager = Tool()
 
     def test_cache_property(self):
         """ Что вернёт это свойство: Если эклемпляр Client, то OK """
@@ -589,7 +588,7 @@ class TestORMHelper(unittest.TestCase, SetUp):
     @db_reinit
     def test_items_property(self):
         self.set_data_into_queue()
-        self.assertEqual(self.orm_manager.cache.get("ORMItems"), self.orm_manager.items)
+        self.assertEqual(self.orm_manager.cache.get("ToolItems"), self.orm_manager.items)
         self.orm_manager.set_item(_insert=True, _model=Cnc, name="Fid")
         self.assertEqual(len(self.orm_manager.items), 11)
 
@@ -598,14 +597,14 @@ class TestORMHelper(unittest.TestCase, SetUp):
     def test_set_item(self):
         # GOOD
         self.orm_manager.set_item(_insert=True, _model=Cnc, name="Fid", commentsymbol="$")
-        self.assertIsNotNone(self.orm_manager.cache.get("ORMItems"))
-        self.assertIsInstance(self.orm_manager.cache.get("ORMItems"), Queue)
-        self.assertEqual(self.orm_manager.cache.get("ORMItems").__len__(), 1)
+        self.assertIsNotNone(self.orm_manager.cache.get("ToolItems"))
+        self.assertIsInstance(self.orm_manager.cache.get("ToolItems"), Queue)
+        self.assertEqual(self.orm_manager.cache.get("ToolItems").__len__(), 1)
         self.assertTrue(self.orm_manager.items[0]["name"] == "Fid")
         self.orm_manager.set_item(_insert=True, _model=Machine, machinename="Helller",
                                   inputcatalog=r"C:\\wdfg", outputcatalog=r"D:\\hfghfgh")
         self.assertEqual(len(self.orm_manager.items), 2)
-        self.assertEqual(len(self.orm_manager.items), len(self.orm_manager.cache.get("ORMItems")))
+        self.assertEqual(len(self.orm_manager.items), len(self.orm_manager.cache.get("ToolItems")))
         self.assertTrue(any(map(lambda x: x.value.get("machinename", None), self.orm_manager.items)))
         self.assertIs(self.orm_manager.items[1].model, Machine)
         self.assertIs(self.orm_manager.items[0].model, Cnc)
@@ -924,11 +923,11 @@ class TestORMHelper(unittest.TestCase, SetUp):
 
 class TestResultPointer(unittest.TestCase, SetUp):
     def setUp(self) -> None:
-        Main.TESTING = True
-        Main.CACHE_LIFETIME_HOURS = 60
-        Main.CACHE_PATH = CACHE_PATH
-        Main.DATABASE_PATH = DATABASE_PATH
-        self.orm_manager = Main()
+        Tool.TESTING = True
+        Tool.CACHE_LIFETIME_HOURS = 60
+        Tool.CACHE_PATH = CACHE_PATH
+        Tool.DATABASE_PATH = DATABASE_PATH
+        self.orm_manager = Tool()
 
     @drop_cache
     @db_reinit
@@ -1004,7 +1003,7 @@ class TestResultPointer(unittest.TestCase, SetUp):
     def test_join_select_pointer(self):
         """ Тестирование Pointer
         Pointer нужен для связывания данных на стороне UI с готовыми инструментами для повторного запроса на эти данные,
-        тем самым перекладывая часть рутинной работы с UI на ORM.
+        тем самым перекладывая часть рутинной работы с UI на Tool.
         """
         self.set_data_into_database()
         self.set_data_into_queue()
@@ -1039,9 +1038,9 @@ class TestResultPointer(unittest.TestCase, SetUp):
 """  not supported - ver 1.
 class TestQueueOrderBy(unittest.TestCase, SetUp):
     def setUp(self) -> None:
-        Main.TESTING = True
-        Main.CACHE_LIFETIME_HOURS = 60
-        self.orm_manager = ORMHelper
+        Tool.TESTING = True
+        Tool.CACHE_LIFETIME_HOURS = 60
+        self.orm_manager = ToolHelper
 
     @db_reinit
     @drop_cache
