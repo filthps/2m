@@ -432,7 +432,7 @@ class TestToolItemQueue(unittest.TestCase):
         self.assertEqual(0, len(queue))
 
 
-class TestResultToolCollection(unittest.TestCase):
+class TestResultORMCollection(unittest.TestCase):
     def setUp(self) -> None:
         Tool.CACHE_PATH = CACHE_PATH
         Tool.DATABASE_PATH = DATABASE_PATH
@@ -448,13 +448,13 @@ class TestResultToolCollection(unittest.TestCase):
                         "_primary_key_from_ui": False, "machinename": "NewTest"
                         }]
         [queue.enqueue(**item) for item in data__len_3]
-        self.result_collection = ResultToolCollection(queue)
+        self.result_collection = ResultORMCollection(queue)
 
     def test_result_orm_collection(self):
         self.assertEqual(self.result_collection.__len__(), 3)
         self.assertTrue(self.result_collection)
         hash_val = hash(self.result_collection)
-        queue = SpecialOrmContainer()
+        queue = ServiceOrmContainer()
         changed_data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
                         "_primary_key_from_ui": False, "machinename": "Tdfgdfgerest"},
@@ -466,7 +466,7 @@ class TestResultToolCollection(unittest.TestCase):
                         "_primary_key_from_ui": False, "machinename": "NewTgest"
                         }]
         [queue.enqueue(**item) for item in changed_data__len_3]
-        result_queue = ResultToolCollection(queue)
+        result_queue = ResultORMCollection(queue)
         self.assertEqual(result_queue.__len__(), 3)
         self.assertTrue(result_queue)
         self.assertEqual(3, len(result_queue))
@@ -493,7 +493,7 @@ class TestResultToolCollection(unittest.TestCase):
                               for val in node.value]))
 
     def test_auto_mode_prefix(self):
-        queue = SpecialOrmContainer()
+        queue = ServiceOrmContainer()
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
                         "_primary_key_from_ui": False, "machinename": "Test", "cncid": 1},
@@ -506,7 +506,7 @@ class TestResultToolCollection(unittest.TestCase):
                  "_create_at": datetime.datetime.now(), "_container": queue, "_insert": True}
                 ]
         [queue.enqueue(**n) for n in data]
-        self.result_collection = ResultToolCollection(queue)
+        self.result_collection = ResultORMCollection(queue)
         self.result_collection.auto_model_prefix()
         self.assertEqual("auto", self.result_collection.prefix)
         # Столбец cncid встречается в обеих нодах, должно произойти добавление префикса с названием таблицы
@@ -588,7 +588,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
     @db_reinit
     def test_items_property(self):
         self.set_data_into_queue()
-        self.assertEqual(self.orm_manager.cache.get("ToolItems"), self.orm_manager.items)
+        self.assertEqual(self.orm_manager.cache.get("ORMItems"), self.orm_manager.items)
         self.orm_manager.set_item(_insert=True, _model=Cnc, name="Fid")
         self.assertEqual(len(self.orm_manager.items), 11)
 
@@ -597,14 +597,14 @@ class TestToolHelper(unittest.TestCase, SetUp):
     def test_set_item(self):
         # GOOD
         self.orm_manager.set_item(_insert=True, _model=Cnc, name="Fid", commentsymbol="$")
-        self.assertIsNotNone(self.orm_manager.cache.get("ToolItems"))
-        self.assertIsInstance(self.orm_manager.cache.get("ToolItems"), Queue)
-        self.assertEqual(self.orm_manager.cache.get("ToolItems").__len__(), 1)
+        self.assertIsNotNone(self.orm_manager.cache.get("ORMItems"))
+        self.assertIsInstance(self.orm_manager.cache.get("ORMItems"), Queue)
+        self.assertEqual(self.orm_manager.cache.get("ORMItems").__len__(), 1)
         self.assertTrue(self.orm_manager.items[0]["name"] == "Fid")
         self.orm_manager.set_item(_insert=True, _model=Machine, machinename="Helller",
                                   inputcatalog=r"C:\\wdfg", outputcatalog=r"D:\\hfghfgh")
         self.assertEqual(len(self.orm_manager.items), 2)
-        self.assertEqual(len(self.orm_manager.items), len(self.orm_manager.cache.get("ToolItems")))
+        self.assertEqual(len(self.orm_manager.items), len(self.orm_manager.cache.get("ORMItems")))
         self.assertTrue(any(map(lambda x: x.value.get("machinename", None), self.orm_manager.items)))
         self.assertIs(self.orm_manager.items[1].model, Machine)
         self.assertIs(self.orm_manager.items[0].model, Cnc)
