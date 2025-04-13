@@ -820,11 +820,6 @@ class Queue(LinkedList, QueueSearchTools):
     def get_related_nodes(self, main_node: QueueItem, other_container=None) -> "Queue":
         """ Получить все связанные (внешним ключом) с передаваемой нодой ноды.
         O(i) * O(1) + O(n) = O(n)"""
-        def get_column_name(data: dict, value) -> Optional[str]:
-            """ Обойти все поля, и, если значение поля совпадает с value, то вернём это название """
-            for name, val in data.items():
-                if val == value:
-                    return name
         root = self
         if other_container is not None:
             if type(other_container) is not self.__class__:
@@ -832,14 +827,15 @@ class Queue(LinkedList, QueueSearchTools):
             root = other_container
         container = self.__class__()
         for related_node in root:  # O(n) * O(j) * O(m) * O(n) * O(1) = O(n)
-            if not related_node == main_node:  # O(g) * O(j) = O (j)
-                for column_name in ModelTools.get_foreign_key_columns(main_node.model):  # O(i)
-                    if main_node.model.__name__ == related_node.model.__tablename__:
-                        pk_field, pk_value = related_node.get_primary_key_and_value(as_tuple=True)
-                        if pk_field == column_name:
-                            main_node_fk_column_name = get_column_name(main_node.value, pk_value)
-                            if main_node_fk_column_name is not None:
-                                container.append(**related_node.get_attributes())  # O(1)
+            if related_node == main_node:  # O(g) * O(j) = O (j)
+                continue
+            pk_field, pk_value = related_node.get_primary_key_and_value(as_tuple=True)
+            for fk_column in ModelTools.get_foreign_key_columns(main_node.model):  # O(i)
+                if pk_field == fk_column:
+                    if fk_column not in main_node.value:
+                        continue
+                    if pk_value == main_node.value[fk_column]:
+                        container.append(**related_node.get_attributes())  # O(1)
         return container
 
     def search_nodes(self, model: Type[CustomModel], negative_selection=False,
@@ -1171,6 +1167,22 @@ class ResultORMCollection:
                         return result
         return self.__collection.__getitem__(item)  # По имени таблицы, по индексу
 
+    def __contains__(self, item: Union):
+        if type(item) is ResultORMItem:
+            if hash(item) in map(hash, self):
+                return True
+            return False
+        try:
+            _ = self.__getitem__(item)
+        except DoesNotExists:
+            return False
+        except TypeError:
+            return False
+        except IndexError:
+            return False
+        else:
+            return True
+
     def __hash__(self):
         return hash(self.__collection)
 
@@ -1448,8 +1460,8 @@ class OrderByMixin(ABC):
     def __check_exists_column_name(model, col_name):
         if col_name not in model().column_names:
             raise KeyError(f"В данной таблице отсутствует столбец {col_name}")
-        
-        
+
+
 class OrderBySingleResultMixin(OrderByMixin):
     """ Реализация для 'одиночного результата',- запрос к одной таблице. См Tool.get_items() """
     def order_by(self, by_column_name: Optional[str] = None, by_primary_key: Optional[bool] = None,
@@ -1603,7 +1615,7 @@ class SQLAlchemyQueryManager:
 
     def _sort_nodes(self) -> list[Queue]:
         """ Сортировать ноды по признаку внешних ключей, определить точки сохранения для транзакций """
-        def make_sort_container(n: QueueItem, linked_nodes: Queue, has_related_nodes):
+        def make_sort_container(n: QueueItem, linked_nodes: Queue):
             """
             Рекурсивно искать ноды с внешними ключами
             O(m) * (O(n) + O(j)) = O(n) * O(m) = O(n)
@@ -1611,31 +1623,20 @@ class SQLAlchemyQueryManager:
             related_nodes = self._node_items.get_related_nodes(n)  # O(n)
             linked_nodes.add_to_head(**n.get_attributes())
             if not related_nodes:
-                if has_related_nodes:
-                    return linked_nodes
-                return
-            else:
-                has_related_nodes = True
+                return linked_nodes
             for node in related_nodes:
-                return make_sort_container(node, linked_nodes, has_related_nodes)
+                return make_sort_container(node, linked_nodes)
         if self._sorted:
             return self._sorted
         node_ = self._node_items.dequeue()
-        other_single_nodes = Queue()
         while node_:
             if self.MAX_RETRIES == "no-limit" or node_.retries < self.MAX_RETRIES:
                 if node_.ready:
-                    recursion_result = make_sort_container(node_, Queue(), False)
-                    if recursion_result is not None:
-                        self._sorted.append(recursion_result)
-                    else:
-                        if node_ not in itertools.chain(*self._sorted):
-                            other_single_nodes.append(**node_.get_attributes())
+                    recursion_result = make_sort_container(node_, Queue())
+                    self._sorted.append(recursion_result)
                 else:
-
                     self.remaining_nodes.append(**node_.get_attributes(new_container=self.remaining_nodes))
             node_ = self._node_items.dequeue()
-        self._sorted.append(other_single_nodes) if other_single_nodes else None
         return self._sorted
 
 
@@ -1678,7 +1679,7 @@ class ServiceOrmContainer(Queue):
     def hash_by_pk(self):
         return sum(map(lambda x: x.hash_by_pk, self))
 
-    def __getitem__(self, model_name_or_index: Union[str, int]) -> Union[DoesNotExists, "ServiceOrmContainer", LinkedListItem]:
+    def __getitem__(self, model_name_or_index: Union[str, int]) -> Union[DoesNotExists, "ServiceOrmContainer", "ResultORMItem"]:
         if not isinstance(model_name_or_index, (str, int,)):
             raise TypeError
         if type(model_name_or_index) is int:
@@ -1693,6 +1694,18 @@ class ServiceOrmContainer(Queue):
         if nodes:
             return nodes[0]
         raise DoesNotExists
+
+    def __contains__(self, item: Union[ServiceOrmItem, ResultORMItem]):
+        i = self.__iter__()
+        while True:
+            try:
+                node = next(i)
+            except StopIteration:
+                break
+            else:
+                if node == item:
+                    return True
+        return False
 
 
 class NodeTypeConverter:
@@ -2128,7 +2141,7 @@ class Tool(ORMAttributes):
     @classmethod
     def is_node_from_cache(cls, _model=None, **attrs) -> bool:
         model = _model or cls._model_obj
-        cls.is_valid_model_instance(_model)
+        cls.is_valid_model_instance(model)
         items = cls.items.search_nodes(model, **attrs)
         if len(items) > 1:
             warnings.warn(f"Нашлось больше одной ноды/нод, - {len(items)}: {items}")
@@ -2139,7 +2152,7 @@ class Tool(ORMAttributes):
     @classmethod
     def is_node_ready(cls, _model=None, **attrs):
         model = _model or cls._model_obj
-        cls.is_valid_model_instance(_model)
+        cls.is_valid_model_instance(model)
         items = cls.items.search_nodes(model, **attrs)
         if not items:
             return
@@ -2156,7 +2169,7 @@ class Tool(ORMAttributes):
         """
         database_adapter = SQLAlchemyQueryManager(cls.DATABASE_PATH, cls.items)
         database_adapter.start()
-        cls.__set_cache(database_adapter.remaining_nodes or None)
+        cls.__set_cache(database_adapter.remaining_nodes)
         sys.exit()
 
     @classmethod
@@ -2181,6 +2194,8 @@ class Tool(ORMAttributes):
 
     @classmethod
     def __set_cache(cls, nodes):
+        if nodes is None:
+            raise TypeError("Покытка установить в кеш None вместо ORMQueue. Это недопустимо")
         cls.cache.set("ORMItems", nodes, cls.CACHE_LIFETIME_HOURS)
 
     @staticmethod
@@ -2295,7 +2310,7 @@ class BaseResult(ABC, ResultCacheTools):
         self._only_queue = only_local
         self._only_db = only_database
         self._pointer: Optional["Pointer"] = None
-        self.__merged_data = []
+        self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
         self._is_sort = False
         self.__is_valid()
         super().__init__(self._id)
@@ -2375,20 +2390,11 @@ class BaseResult(ABC, ResultCacheTools):
             _ = self[item]
         except KeyError:
             return False
-        return True
+        else:
+            return True
 
     def __getitem__(self, item: Union[str, int]):
-        if not item:
-            raise KeyError
-        if type(item) is str:
-            node = self._get_node_by_joined_primary_key_and_value(item)
-            if node is None:
-                raise KeyError
-            return node
-        if type(item) is int:
-            items = self.items
-            return dict(zip([node_or_node_group.__hash__() for node_or_node_group in items], items))[item]
-        raise TypeError
+        return self.items[item]
 
     @staticmethod
     def _parse_joined_primary_key_and_value(value, sep=":"):
@@ -2523,22 +2529,28 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
             self._save_result_collection(result)
         return result
 
-    def __getitem__(self, item: int) -> ServiceOrmContainer:
-        if not isinstance(item, int):
+    def __getitem__(self, item: int) -> ResultORMCollection:
+        data = self.items
+        if type(item) is not int:
             raise TypeError
-        if item not in self:
-            raise DoesNotExists
+        if item in range(len(data)):
+            return data[item]
         for group in self:
             if hash(group) == item:
                 return group
+            if group.hash_by_pk == item:
+                return group
 
-    def __contains__(self, item: Union[int, ServiceOrmContainer, ServiceOrmItem]):
-        if not isinstance(item, (ServiceOrmContainer, ServiceOrmItem, int,)):
-            return False
+    def __contains__(self, item: Union[int, ResultORMCollection, ResultORMItem]):
         if type(item) is int:
-            return item in map(lambda x: hash(x), self)
-        if isinstance(item, (ServiceOrmItem, ServiceOrmContainer,)):
-            return hash(item) in map(lambda x: x.__hash__(), self)
+            nodes = self.items
+            if item in map(hash, nodes):
+                return True
+            if item in (nodes.hash_by_pk for nodes in nodes):
+                return True
+            return False
+        if isinstance(item, (ResultORMItem, ResultORMCollection,)):
+            return hash(item) in map(hash, self)
         return False
 
     def _merge(self) -> tuple[ResultORMCollection]:
