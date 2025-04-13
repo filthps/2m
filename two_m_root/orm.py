@@ -1167,8 +1167,21 @@ class ResultORMCollection:
                         return result
         return self.__collection.__getitem__(item)  # По имени таблицы, по индексу
 
-    def __contains__(self, item: ResultORMItem):
-        return self.__collection.__contains__(item)
+    def __contains__(self, item: Union):
+        if type(item) is ResultORMItem:
+            if hash(item) in map(hash, self):
+                return True
+            return False
+        try:
+            _ = self.__getitem__(item)
+        except DoesNotExists:
+            return False
+        except TypeError:
+            return False
+        except IndexError:
+            return False
+        else:
+            return True
 
     def __hash__(self):
         return hash(self.__collection)
@@ -1666,7 +1679,7 @@ class ServiceOrmContainer(Queue):
     def hash_by_pk(self):
         return sum(map(lambda x: x.hash_by_pk, self))
 
-    def __getitem__(self, model_name_or_index: Union[str, int]) -> Union[DoesNotExists, "ServiceOrmContainer", LinkedListItem]:
+    def __getitem__(self, model_name_or_index: Union[str, int]) -> Union[DoesNotExists, "ServiceOrmContainer", "ResultORMItem"]:
         if not isinstance(model_name_or_index, (str, int,)):
             raise TypeError
         if type(model_name_or_index) is int:
@@ -2297,7 +2310,7 @@ class BaseResult(ABC, ResultCacheTools):
         self._only_queue = only_local
         self._only_db = only_database
         self._pointer: Optional["Pointer"] = None
-        self.__merged_data = []
+        self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
         self._is_sort = False
         self.__is_valid()
         super().__init__(self._id)
@@ -2517,21 +2530,27 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
         return result
 
     def __getitem__(self, item: int) -> ResultORMCollection:
-        if not isinstance(item, int):
+        data = self.items
+        if type(item) is not int:
             raise TypeError
-        if item not in self:
-            raise DoesNotExists
+        if item in range(len(data)):
+            return data[item]
         for group in self:
             if hash(group) == item:
                 return group
+            if group.hash_by_pk == item:
+                return group
 
-    def __contains__(self, item: Union[int, ServiceOrmContainer, ServiceOrmItem]):
-        if not isinstance(item, (ResultORMCollection, ResultORMItem, int,)):
-            return False
+    def __contains__(self, item: Union[int, ResultORMCollection, ResultORMItem]):
         if type(item) is int:
-            return item in map(lambda x: hash(x), self)
-        if isinstance(item, (ServiceOrmItem, ServiceOrmContainer,)):
-            return hash(item) in map(lambda x: x.__hash__(), self)
+            nodes = self.items
+            if item in map(hash, nodes):
+                return True
+            if item in (nodes.hash_by_pk for nodes in nodes):
+                return True
+            return False
+        if isinstance(item, (ResultORMItem, ResultORMCollection,)):
+            return hash(item) in map(hash, self)
         return False
 
     def _merge(self) -> tuple[ResultORMCollection]:
