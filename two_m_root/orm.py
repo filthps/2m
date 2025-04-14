@@ -1733,6 +1733,14 @@ class NodeTypeConverter:
             raise TypeError
 
 
+def close_connection(f):
+    def wrapper(cls: "Tool"):
+        r = f(cls)
+        r.close()
+        return r
+    return wrapper
+
+
 class Tool(ORMAttributes):
     """
     Главный класс
@@ -1752,8 +1760,6 @@ class Tool(ORMAttributes):
     DATABASE_PATH = DATABASE_PATH
     RELEASE_INTERVAL_SECONDS = RELEASE_INTERVAL_SECONDS
     CACHE_LIFETIME_HOURS = CACHE_LIFETIME_HOURS
-    _memcache_connection: Optional[RetryingClient] = None
-    _database_session = None
     _timer: Optional[threading.Timer] = None
     _model_obj: Optional[Type[CustomModel]] = None  # Текущий класс модели, присваиваемый автоматически всем экземплярам при добавлении в очередь
     _was_initialized = False
@@ -1770,15 +1776,14 @@ class Tool(ORMAttributes):
 
     @classmethod
     @property
+    @close_connection
     def cache(cls):
-        if cls._memcache_connection is None:
-            cls._memcache_connection = RetryingClient(
-                Client(cls.CACHE_PATH, serde=DillSerde),
-                attempts=RETRYING_CLIENT_ATTEMPTS,
-                retry_delay=RETRYING_CLIENT_RETRY_DELAY,
-                retry_for=[MemcacheError]
-            )
-        return cls._memcache_connection
+        return RetryingClient(
+            Client(cls.CACHE_PATH, serde=DillSerde),
+            attempts=RETRYING_CLIENT_ATTEMPTS,
+            retry_delay=RETRYING_CLIENT_RETRY_DELAY,
+            retry_for=[MemcacheError]
+        )
 
     @classmethod
     def drop_cache(cls):
@@ -1786,18 +1791,18 @@ class Tool(ORMAttributes):
 
     @classmethod
     @property
+    @close_connection
     def database(cls) -> Session:
-        if cls._database_session is None:
-            engine = create_engine(cls.DATABASE_PATH)
-            try:
-                session_f = session_factory(bind=engine)
-                cls._database_session = scoped_session(session_f)
-            except DisconnectionError:
-                print("Ошибка соединения с базой данных!")
-                raise DisconnectionError
-            else:
-                print("Подключение к базе данных")
-        return cls._database_session()
+        engine = create_engine(cls.DATABASE_PATH)
+        try:
+            session_f = session_factory(bind=engine)
+            session = scoped_session(session_f)
+        except DisconnectionError:
+            print("Ошибка соединения с базой данных!")
+            raise DisconnectionError
+        else:
+            print("Подключение к базе данных")
+        return session
 
     @classmethod
     @property
