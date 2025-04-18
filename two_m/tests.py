@@ -4,6 +4,7 @@ import time
 from typing import Optional
 from sqlalchemy import text, select
 from dotenv import load_dotenv
+from sqlalchemy.orm.scoping import ScopedSession
 from procedures import init_all_triggers
 from models import *
 from two_m_root.orm import *
@@ -66,7 +67,7 @@ class SetUp:
         :return:
         """
         self.orm_manager.database.add(Cnc(name="NC210", commentsymbol=","))
-        self.orm_manager.database.add(Numeration(numerationid=3))
+        self.orm_manager.database.add(Numeration())
         self.orm_manager.database.add(Comment(findstr="test_str", iffullmatch=True))
         self.orm_manager.database.commit()
         self.orm_manager.database.add(Machine(machinename="Heller",
@@ -74,7 +75,7 @@ class SetUp:
                                               inputcatalog=r"C:\Windows",
                                               outputcatalog=r"X:\path"))
         self.orm_manager.database.add(OperationDelegation(
-            numerationid=self.orm_manager.database.scalar(select(Numeration)).numerationid,
+            numerationid=1,
             operationdescription="Нумерация. Добавил сразу в БД"
         ))
         self.orm_manager.database.add(OperationDelegation(commentid=self.orm_manager.database.scalar(select(Comment)).commentid))
@@ -90,8 +91,7 @@ class SetUp:
         self.orm_manager.set_item(_model=Numeration, numerationid=2, endat=269, _insert=True)
         self.orm_manager.set_item(_insert=True, _model=OperationDelegation, numerationid=2, operationdescription="Нумерация кадров")
         self.orm_manager.set_item(_model=Comment, findstr="test_string_set_from_queue", ifcontains=True, _insert=True, commentid=2)
-        self.orm_manager.set_item(_model=OperationDelegation, commentid=2, _insert=True,
-                                  operationdescription="Комментарий")
+        self.orm_manager.set_item(_model=OperationDelegation, commentid=2, _insert=True, operationdescription="Комментарий")
         self.orm_manager.set_item(_model=Cnc, _insert=True, cncid=2, name="Ram", commentsymbol="#")
         self.orm_manager.set_item(_model=Cnc, _insert=True, cncid=1, name="Newcnc", commentsymbol="!")
         self.orm_manager.set_item(_model=Machine, machineid=2, cncid=2, machinename="Fidia", inputcatalog=r"D:\Heller",
@@ -276,27 +276,61 @@ class TestToolItemQueue(unittest.TestCase):
         queue = Queue()
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                  "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                 "_primary_key_from_ui": False, "machinename": "Test"},
+                 "machinename": "Test", "machineid": 1},
                 {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                  "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                 "_primary_key_from_ui": False, "machinename": "Name"},
+                 "machinename": "Name", "machineid": 4},
                 {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                  "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                 "_primary_key_from_ui": False, "machinename": "NewTest"
+                 "machinename": "NewTest", "machineid": 2
                  }]
-        new_queue = Queue(data)
+        Queue(data)
+        # invalid primary key
+        data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "machinename": "Test", "machineid": {}},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "machinename": "Name", "machineid": 4},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "machinename": "NewTest", "machineid": int
+                 }]
+        with self.assertRaises(NodeColumnValueError):
+            Queue(data)
+        data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "machinename": "Test", "machineid": ""}]
+        with self.assertRaises(NodeColumnValueError):
+            Queue(data)
+        data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "machinename": "Test", "machineid": "12"}]
+        with self.assertRaises(NodeColumnValueError):
+            Queue(data)
+        data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "machinename": "Test", "machineid": None}]
+        with self.assertRaises(NodePrimaryKeyError):
+            Queue(data)
+        data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "machinename": "Test"}]
+        with self.assertRaises(NodePrimaryKeyError):
+            Queue(data)
+        # повторение столбца c unique constraint - machinename
 
     def test_enqueue(self):
         queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test"},
+                        "machinename": "Test", "machineid": 1},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test1"},
+                        "machinename": "Test1", "machineid": 2},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "NewTest"
+                        "machinename": "NewTest", "machineid": 3
                         }]
         self.assertIsNone(queue.dequeue())
         self.assertEqual(queue.__len__(), 0)
@@ -331,34 +365,28 @@ class TestToolItemQueue(unittest.TestCase):
         queue = Queue()
         data__len_1 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test", "xover": 10},
+                        "machinename": "Test", "xover": 10, "machineid": 3},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test", "yover": 10},
+                        "machinename": "Test", "yover": 10, "machineid": 3},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test", "zover": 10
+                        "machinename": "Test", "zover": 10, "machineid": 3
                         }]
         [queue.enqueue(**data__len_1[i]) for i in range(len(data__len_1))]
         self.assertEqual(queue.__len__(), 1)
         #  Проверить, что новые данные, которые добавлялись за 3 итерации, вошли в результирующую ноду
         self.assertEqual(len(set(queue[0].value).intersection(set({"xover": 10, "yover": 10, "zover": 10}))), 3)
-        #
-        #  Ситуация, когда первичный ключ был передан явно
-        #
         queue = Queue()
         data_with_primary_key_from_ui = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                                           "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                                          "_primary_key_from_ui":
-                                              {"machineid": 1}, "machinename": "FirstTest", "xover": 10},
+                                          "machinename": "FirstTest", "xover": 10, "machineid": 3},
                                          {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                                           "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                                          "_primary_key_from_ui":
-                                              {"machineid": 1}, "machinename": "Test", "yover": 10},
+                                          "machinename": "Test", "yover": 10, "machineid": 3},
                                          {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                                           "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                                          "_primary_key_from_ui":
-                                              {"machineid": 1}, "machinename": "LastName", "zover": 10, "xover": 0,
+                                          "machinename": "LastName", "zover": 10, "xover": 0, "machineid": 3
                                           }]
         [queue.enqueue(**data) for data in data_with_primary_key_from_ui]
         self.assertEqual(queue.__len__(), 1)
@@ -372,13 +400,13 @@ class TestToolItemQueue(unittest.TestCase):
         queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test"},
+                        "machinename": "Test", "machineid": 3},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test1"},
+                        "machinename": "Test1", "machineid": 2},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "NewTest"
+                        "machinename": "NewTest", "machineid": 1
                         }]
         with self.assertRaises(IndexError):
             queue[0]
@@ -408,13 +436,13 @@ class TestToolItemQueue(unittest.TestCase):
         queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test"},
+                        "machinename": "Test", "machineid": 1},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test1"},
+                        "machinename": "Test1", "machineid": 2},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "NewTest"
+                        "machinename": "NewTest", "machineid": 3
                         }]
         [queue.enqueue(**data) for data in data__len_3]
         self.assertEqual(3, len(queue))
@@ -439,13 +467,13 @@ class TestResultORMCollection(unittest.TestCase):
         queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test"},
+                        "machinename": "Test", "machineid": 1},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test1"},
+                        "machinename": "Test1", "machineid": 2},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "NewTest"
+                        "machinename": "NewTest", "machineid": 3
                         }]
         [queue.enqueue(**item) for item in data__len_3]
         self.result_collection = ResultORMCollection(queue)
@@ -456,15 +484,15 @@ class TestResultORMCollection(unittest.TestCase):
         hash_val = hash(self.result_collection)
         queue = ServiceOrmContainer()
         changed_data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Tdfgdfgerest"},
-                       {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test1"},
-                       {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "NewTgest"
-                        }]
+                                "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                                "machinename": "Tdfgdfgerest", "machineid": 1},
+                               {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                                "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                                "machinename": "Test1", "machineid": 2},
+                               {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                                "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                                "machinename": "NewTgest", "machineid": 3
+                                }]
         [queue.enqueue(**item) for item in changed_data__len_3]
         result_queue = ResultORMCollection(queue)
         self.assertEqual(result_queue.__len__(), 3)
@@ -495,14 +523,14 @@ class TestResultORMCollection(unittest.TestCase):
     def test_auto_mode_prefix(self):
         queue = ServiceOrmContainer()
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "machinename": "Test", "cncid": 1},
+                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "machinename": "Test", "cncid": 1, "machineid": 1},
                 {"_model": Cnc, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
-                        "_primary_key_from_ui": False, "name": "Testcnc", "cncid": 1},
-                {"_model": OperationDelegation, "replaceid": 1, "_primary_key_from_ui": False,
-                 "_create_at": datetime.datetime.now(), "_container": queue, "_insert": True},
-                {"_model": Replace, "replaceid": 1, "_primary_key_from_ui": {"replaceid": 1}, "findstr": "trststr",
+                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "name": "Testcnc", "cncid": 1},
+                {"_model": OperationDelegation, "replaceid": 1,
+                 "_create_at": datetime.datetime.now(), "_container": queue, "_insert": True, "opid": str(uuid4())},
+                {"_model": Replace, "replaceid": 1, "findstr": "trststr",
                  "_create_at": datetime.datetime.now(), "_container": queue, "_insert": True}
                 ]
         [queue.enqueue(**n) for n in data]
@@ -537,12 +565,10 @@ class TestToolHelper(unittest.TestCase, SetUp):
 
     def test_not_configured_model(self):
         """ Предварительно не был вызван метод set_model. Неправильная конфигурация"""
+        self.orm_manager.get_items(_model=Machine, machinename="test_name")
+        self.orm_manager.get_items(_model=Machine)
         with self.assertRaises(InvalidModel):
-            self.orm_manager.get_item(_model=Machine, machinename="test_name")
-        with self.assertRaises(InvalidModel):
-            self.orm_manager.get_items(_model=Machine)
-        with self.assertRaises(InvalidModel):
-            self.orm_manager.set_item(_insert=True, _model=Machine, machinename="Heller", _ready=True)
+            self.orm_manager.set_item(_insert=True, machinename="Heller", _ready=True)
 
     def test_drop_cache(self):
         self.orm_manager.cache.set("1", "test")
@@ -552,13 +578,13 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertIsNone(self.orm_manager.cache.get("3"))
 
     def test_database_property(self):
-        self.assertIsInstance(self.orm_manager.database, Session)
+        self.assertIsInstance(self.orm_manager.database, ScopedSession)
 
     @db_reinit
     def test_database_insert_and_select_single_entry(self):
-        with self.orm_manager.database as session:
-            session.add(Machine(machinename="Test", inputcatalog=r"C:\Test", outputcatalog="C:\\TestPath"))
-            session.commit()
+        session = self.orm_manager.database
+        session.add(Machine(machinename="Test", inputcatalog=r"C:\Test", outputcatalog="C:\\TestPath"))
+        session.commit()
         self.assertEqual(self.orm_manager.database.execute(text("SELECT COUNT(machineid) FROM machine")).scalar(), 1)
         data = self.orm_manager.database.execute(select(Machine).filter_by(machinename="Test")).scalar().__dict__
         self.assertEqual(data["machinename"], "Test")
@@ -567,10 +593,10 @@ class TestToolHelper(unittest.TestCase, SetUp):
 
     @db_reinit
     def test_database_insert_and_select_two_joined_entries(self):
-        with self.orm_manager.database as session:
-            session.add(Cnc(name="testcnc", commentsymbol="*"))
-            session.add(Machine(machinename="Test", inputcatalog="C:\\Test", outputcatalog="C:\\TestPath", cncid=1))
-            session.commit()
+        session = self.orm_manager.database
+        session.add(Cnc(name="testcnc", commentsymbol="*"))
+        session.add(Machine(machinename="Test", inputcatalog="C:\\Test", outputcatalog="C:\\TestPath", cncid=1))
+        session.commit()
         self.assertEqual(self.orm_manager.database.execute(text("SELECT COUNT(*) "
                                                                 "FROM machine "
                                                                 "INNER JOIN cnc "
@@ -589,7 +615,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
     def test_items_property(self):
         self.set_data_into_queue()
         self.assertEqual(self.orm_manager.cache.get("ORMItems"), self.orm_manager.items)
-        self.orm_manager.set_item(_insert=True, _model=Cnc, name="Fid")
+        self.orm_manager.set_item(_insert=True, _model=Cnc, name="F")
         self.assertEqual(len(self.orm_manager.items), 11)
 
     @drop_cache
@@ -670,7 +696,11 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertEqual(self.orm_manager.get_items(_model=Machine).__len__(), 1)
         self.assertEqual(self.orm_manager.get_items(_model=Condition).__len__(), 1)
         self.assertEqual(self.orm_manager.get_items(_model=Cnc).__len__(), 1)
-        self.orm_manager.set_item(_model=Machine, machinename="Fidia", inputcatalog="C:\\pathnew", _update=True, outputcatalog=r"T:\name")
+        self.assertEqual(self.orm_manager.get_items(_model=Cnc, commentsymbol="$").__len__(), 1)
+        self.assertEqual(self.orm_manager.get_items(_model=Cnc, name="Fid").__len__(), 1)
+        self.orm_manager.set_item(_model=Machine, machinename="Fidia", inputcatalog="C:\\pathnew", _insert=True, outputcatalog=r"T:\name")
+        self.assertEqual(self.orm_manager.get_items(Machine, machinename="Fidia")[0]["machinename"], "Fidia")
+        self.assertEqual(self.orm_manager.get_items(Machine, machinename="Fidia").__len__(), 1)
 
     @drop_cache
     @db_reinit
@@ -698,7 +728,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertEqual("Нумерация. Добавил сразу в БД", result.items[0]["OperationDelegation"]["operationdescription"])
         self.assertNotEqual("Нумерация. Добавил сразу в БД", result.items[1]["OperationDelegation"]["operationdescription"])
         self.assertEqual("Нумерация кадров", result.items[1]["OperationDelegation"]["operationdescription"])
-        self.assertEqual(result.items[0]["Numeration"]["numerationid"], 3)
+        self.assertEqual(result.items[0]["Numeration"]["numerationid"], 1)
         self.assertEqual(269, result.items[1]["Numeration"]["endat"])
         #
         # Comment - OperationDelegation
@@ -906,13 +936,14 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.orm_manager.set_item(_model=Machine, machinename="newmachine", _insert=True, machineid=1)
         # В тесте ниже возвращаемый результат - False, потому как, несмотря на то,
         # что мы добавили 2 записи, они не указывают друг на друга по внешнему ключу
+        # и поэтому не затрагивают нашу выборку
         self.assertFalse(result.has_new_entries())
         # Добавим связь и убедимся, что результатом на наш запрос вернётся - True
         self.orm_manager.set_item(_model=Machine, machinename="newmachine", _update=True, cncid=1)
         self.assertTrue(result.has_new_entries())
         self.assertFalse(result.has_new_entries())
-        self.orm_manager.set_item(_model=Machine, machinename="othermachine", _insert=True, cncid=2)  # cncid==2 на след строке
         self.orm_manager.set_item(_model=Cnc, name="Test_new", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="othermachine", _insert=True, cncid=2)
         self.assertTrue(result.has_new_entries())
         self.assertFalse(result.has_new_entries())
         self.assertFalse(result.has_new_entries())
@@ -970,11 +1001,11 @@ class TestResultPointer(unittest.TestCase, SetUp):
         self.assertFalse(result.pointer.has_changes("Станок 3"))
         self.assertFalse(result.pointer.has_changes("Станок 2"))
         self.assertFalse(result.pointer.has_changes("Станок 4"))
-        self.assertTrue(result.pointer)
+        self.assertTrue(result.pointer.is_valid)
         # А теперь изменим сами(со стороны нашего ui) первую запись, которая ассоциируется со 'Станок 1'
         self.orm_manager.set_item(Machine, machineid=2, machinename="test",
                                   _update=True)
-        self.assertTrue(result.pointer)
+        self.assertTrue(result.pointer.is_valid)
         self.assertFalse(result.pointer.has_changes("Станок 3"))
         self.assertFalse(result.pointer.has_changes("Станок 2"))
         self.assertFalse(result.pointer.has_changes("Станок 4"))
