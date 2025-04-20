@@ -12,8 +12,6 @@ MEMCACHE_PATH = os.environ.get("CACHE_PATH")
 # Tool
 RELEASE_INTERVAL_SECONDS: float = 5.0
 CACHE_LIFETIME_HOURS: int = 1 * 60 * 60
-RETRYING_CLIENT_ATTEMPTS: int = 10
-RETRYING_CLIENT_RETRY_DELAY: float = 0.3
 # SQLAlchemyQueryManager
 MAX_RETRIES: typing.Union[int, typing.Literal["no-limit"]] = "no-limit"
 # ResultORMCollection
