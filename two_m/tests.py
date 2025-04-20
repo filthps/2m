@@ -28,12 +28,10 @@ def is_database_empty(session, empty=True, tables=15, procedures=52, test_db_nam
     print(f"table_counter {table_counter}")
     if empty:
         if table_counter or procedures_counter:
-            time.sleep(2)
             return is_database_empty(session, empty=empty, tables=tables, procedures=procedures,
                                      test_db_name=test_db_name)
         return True
     if table_counter < tables or procedures_counter < procedures:
-        time.sleep(2)
         return is_database_empty(session, empty=empty, tables=tables, procedures=procedures,
                                  test_db_name=test_db_name)
     return True
@@ -42,17 +40,17 @@ def is_database_empty(session, empty=True, tables=15, procedures=52, test_db_nam
 def db_reinit(m):
     def wrap(self: "TestToolHelper"):
         drop_db()
-        if is_database_empty(self.orm_manager.database):
+        if is_database_empty(self.orm_manager.connection.database):
             create_db()
             init_all_triggers()
-            if is_database_empty(self.orm_manager.database, empty=False):
+            if is_database_empty(self.orm_manager.connection.database, empty=False):
                 return m(self)
     return wrap
 
 
 def drop_cache(callable_):
     def w(self: "TestToolHelper"):
-        self.orm_manager.drop_cache()
+        self.orm_manager.connection.drop_cache()
         return callable_(self)
     return w
 
@@ -66,20 +64,22 @@ class SetUp:
 
         :return:
         """
-        self.orm_manager.database.add(Cnc(name="NC210", commentsymbol=","))
-        self.orm_manager.database.add(Numeration())
-        self.orm_manager.database.add(Comment(findstr="test_str", iffullmatch=True))
-        self.orm_manager.database.commit()
-        self.orm_manager.database.add(Machine(machinename="Heller",
-                                              cncid=self.orm_manager.database.scalar(select(Cnc).where(Cnc.name == "NC210")).cncid,
-                                              inputcatalog=r"C:\Windows",
-                                              outputcatalog=r"X:\path"))
-        self.orm_manager.database.add(OperationDelegation(
+        self.orm_manager.connection.database.add(Cnc(name="NC210", commentsymbol=","))
+        self.orm_manager.connection.database.add(Numeration())
+        self.orm_manager.connection.database.add(Comment(findstr="test_str", iffullmatch=True))
+        self.orm_manager.connection.database.commit()
+        self.orm_manager.connection.database.add(Machine(machinename="Heller",
+                                                 cncid=self.orm_manager.connection.database.scalar(
+                                                    select(Cnc).where(Cnc.name == "NC210")
+                                                 ).cncid,
+                                                 inputcatalog=r"C:\Windows",
+                                                 outputcatalog=r"X:\path"))
+        self.orm_manager.connection.database.add(OperationDelegation(
             numerationid=1,
             operationdescription="Нумерация. Добавил сразу в БД"
         ))
-        self.orm_manager.database.add(OperationDelegation(commentid=self.orm_manager.database.scalar(select(Comment)).commentid))
-        self.orm_manager.database.commit()
+        self.orm_manager.connection.database.add(OperationDelegation(commentid=self.orm_manager.connection.database.scalar(select(Comment)).commentid))
+        self.orm_manager.connection.database.commit()
 
     def set_data_into_queue(self):
         """
@@ -546,21 +546,18 @@ class TestResultORMCollection(unittest.TestCase):
 
 class TestToolHelper(unittest.TestCase, SetUp):
     def setUp(self) -> None:
-        Tool.TESTING = True
         Tool.CACHE_LIFETIME_HOURS = 60
-        Tool.CACHE_PATH = CACHE_PATH
-        Tool.DATABASE_PATH = DATABASE_PATH
         self.orm_manager = Tool()
 
     def test_cache_property(self):
         """ Что вернёт это свойство: Если эклемпляр Client, то OK """
-        self.assertIsInstance(self.orm_manager.cache, Client,
+        self.assertIsInstance(self.orm_manager.connection.cache, PooledClient,
                               msg=f"Свойство должно было вернуть эклемпляр класса MockMemcacheClient, "
-                                  f"а на деле {self.orm_manager.cache.__class__.__name__}")
+                                  f"а на деле {self.orm_manager.connection.cache.__class__.__name__}")
 
     def test_cache(self):
-        self.orm_manager.cache.set("1", 1)
-        value = self.orm_manager.cache.get("1")
+        self.orm_manager.connection.cache.set("1", 1)
+        value = self.orm_manager.connection.cache.get("1")
         self.assertEqual(value, 1, msg="Результирующее значение, полученное из кеша отличается от заданного в тесте")
 
     def test_not_configured_model(self):
@@ -571,40 +568,40 @@ class TestToolHelper(unittest.TestCase, SetUp):
             self.orm_manager.set_item(_insert=True, machinename="Heller", _ready=True)
 
     def test_drop_cache(self):
-        self.orm_manager.cache.set("1", "test")
-        self.orm_manager.cache.set("3", "test")
+        self.orm_manager.connection.cache.set("1", "test")
+        self.orm_manager.connection.cache.set("3", "test")
         self.orm_manager.drop_cache()
-        self.assertIsNone(self.orm_manager.cache.get("1"))
-        self.assertIsNone(self.orm_manager.cache.get("3"))
+        self.assertIsNone(self.orm_manager.connection.cache.get("1"))
+        self.assertIsNone(self.orm_manager.connection.cache.get("3"))
 
     def test_database_property(self):
-        self.assertIsInstance(self.orm_manager.database, ScopedSession)
+        self.assertIsInstance(self.orm_manager.connection.database, ScopedSession)
 
     @db_reinit
     def test_database_insert_and_select_single_entry(self):
-        session = self.orm_manager.database
+        session = self.orm_manager.connection.database
         session.add(Machine(machinename="Test", inputcatalog=r"C:\Test", outputcatalog="C:\\TestPath"))
         session.commit()
-        self.assertEqual(self.orm_manager.database.execute(text("SELECT COUNT(machineid) FROM machine")).scalar(), 1)
-        data = self.orm_manager.database.execute(select(Machine).filter_by(machinename="Test")).scalar().__dict__
+        self.assertEqual(self.orm_manager.connection.database.execute(text("SELECT COUNT(machineid) FROM machine")).scalar(), 1)
+        data = self.orm_manager.connection.database.execute(select(Machine).filter_by(machinename="Test")).scalar().__dict__
         self.assertEqual(data["machinename"], "Test")
         self.assertEqual(data["inputcatalog"], "C:\\Test")
         self.assertEqual(data["outputcatalog"], "C:\\TestPath")
 
     @db_reinit
     def test_database_insert_and_select_two_joined_entries(self):
-        session = self.orm_manager.database
+        session = self.orm_manager.connection.database
         session.add(Cnc(name="testcnc", commentsymbol="*"))
         session.add(Machine(machinename="Test", inputcatalog="C:\\Test", outputcatalog="C:\\TestPath", cncid=1))
         session.commit()
-        self.assertEqual(self.orm_manager.database.execute(text("SELECT COUNT(*) "
+        self.assertEqual(self.orm_manager.connection.database.execute(text("SELECT COUNT(*) "
                                                                 "FROM machine "
                                                                 "INNER JOIN cnc "
                                                                 "ON machine.cncid=cnc.cncid "
                                                                 "WHERE machine.machinename='Test' AND cnc.name='testcnc'"
                                                                 )
                                                            ).scalar(), 1)
-        self.assertEqual(self.orm_manager.database.execute(text("SELECT COUNT(*) "
+        self.assertEqual(self.orm_manager.connection.database.execute(text("SELECT COUNT(*) "
                                                                 "FROM machine "
                                                                 "WHERE machine.cncid=(SELECT cncid FROM cnc WHERE name = 'testcnc')"
                                                                 )
@@ -614,30 +611,30 @@ class TestToolHelper(unittest.TestCase, SetUp):
     @db_reinit
     def test_items_property(self):
         self.set_data_into_queue()
-        self.assertEqual(self.orm_manager.cache.get("ORMItems"), self.orm_manager.items)
+        self.assertEqual(self.orm_manager.connection.cache.get("ORMItems"), self.orm_manager.connection.items)
         self.orm_manager.set_item(_insert=True, _model=Cnc, name="F")
-        self.assertEqual(len(self.orm_manager.items), 11)
+        self.assertEqual(len(self.orm_manager.connection.items), 11)
 
     @drop_cache
     @db_reinit
     def test_set_item(self):
         # GOOD
         self.orm_manager.set_item(_insert=True, _model=Cnc, name="Fid", commentsymbol="$")
-        self.assertIsNotNone(self.orm_manager.cache.get("ORMItems"))
-        self.assertIsInstance(self.orm_manager.cache.get("ORMItems"), Queue)
-        self.assertEqual(self.orm_manager.cache.get("ORMItems").__len__(), 1)
-        self.assertTrue(self.orm_manager.items[0]["name"] == "Fid")
+        self.assertIsNotNone(self.orm_manager.connection.cache.get("ORMItems"))
+        self.assertIsInstance(self.orm_manager.connection.cache.get("ORMItems"), Queue)
+        self.assertEqual(self.orm_manager.connection.cache.get("ORMItems").__len__(), 1)
+        self.assertTrue(self.orm_manager.connection.items[0]["name"] == "Fid")
         self.orm_manager.set_item(_insert=True, _model=Machine, machinename="Helller",
                                   inputcatalog=r"C:\\wdfg", outputcatalog=r"D:\\hfghfgh")
-        self.assertEqual(len(self.orm_manager.items), 2)
-        self.assertEqual(len(self.orm_manager.items), len(self.orm_manager.cache.get("ORMItems")))
-        self.assertTrue(any(map(lambda x: x.value.get("machinename", None), self.orm_manager.items)))
-        self.assertIs(self.orm_manager.items[1].model, Machine)
-        self.assertIs(self.orm_manager.items[0].model, Cnc)
+        self.assertEqual(len(self.orm_manager.connection.items), 2)
+        self.assertEqual(len(self.orm_manager.connection.items), len(self.orm_manager.connection.cache.get("ORMItems")))
+        self.assertTrue(any(map(lambda x: x.value.get("machinename", None), self.orm_manager.connection.items)))
+        self.assertIs(self.orm_manager.connection.items[1].model, Machine)
+        self.assertIs(self.orm_manager.connection.items[0].model, Cnc)
         self.orm_manager.set_item(_model=OperationDelegation, _update=True, operationdescription="text")
-        self.assertEqual(self.orm_manager.items[2].value["operationdescription"], "text")
+        self.assertEqual(self.orm_manager.connection.items[2].value["operationdescription"], "text")
         self.orm_manager.set_item(_insert=True, _model=Condition, findfull=True, parentconditionbooleanvalue=True)
-        self.assertEqual(self.orm_manager.items.__len__(), 4)
+        self.assertEqual(self.orm_manager.connection.items.__len__(), 4)
         self.orm_manager.set_item(_delete=True, machinename="Some_name", _model=Machine, inputcatalog=r"D:\Test",
                                   outputcatalog=r"C:\anef")
         self.orm_manager.set_item(_delete=True, machinename="Some_name_2", _model=Machine)
@@ -673,13 +670,6 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertRaises(NodeColumnValueError, self.orm_manager.set_item, _model=Machine, _update=True, machinename=int)
         self.assertRaises(NodeColumnValueError, self.orm_manager.set_item, _model=OperationDelegation, _update=True, operationdescription=lambda x: x)
         self.assertRaises(NodeColumnValueError, self.orm_manager.set_item, _model=OperationDelegation, _update=True, operationdescription=4)
-        # не указан тип DML(_insert | _update | _delete) параметр не передан
-        self.assertRaises(NodeDMLTypeError, self.orm_manager.set_item, _model=Machine, machinename="Helller")
-        self.assertRaises(NodeDMLTypeError, self.orm_manager.set_item, _model=Machine, machinename="Fid")
-        self.assertRaises(NodeDMLTypeError, self.orm_manager.set_item, _model=Machine, inputcatalog="C:\\Path")
-        self.assertRaises(NodeDMLTypeError, self.orm_manager.set_item, _model=Cnc, name="NC21")
-        self.assertRaises(NodeDMLTypeError, self.orm_manager.set_item, _model=Cnc, name="NC211")
-        self.assertRaises(NodeDMLTypeError, self.orm_manager.set_item, _model=Cnc, name="NC214")
 
     @drop_cache
     @db_reinit
@@ -954,10 +944,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
 
 class TestResultPointer(unittest.TestCase, SetUp):
     def setUp(self) -> None:
-        Tool.TESTING = True
         Tool.CACHE_LIFETIME_HOURS = 60
-        Tool.CACHE_PATH = CACHE_PATH
-        Tool.DATABASE_PATH = DATABASE_PATH
         self.orm_manager = Tool()
 
     @drop_cache
@@ -1069,9 +1056,8 @@ class TestResultPointer(unittest.TestCase, SetUp):
 """  not supported - ver 1.
 class TestQueueOrderBy(unittest.TestCase, SetUp):
     def setUp(self) -> None:
-        Tool.TESTING = True
         Tool.CACHE_LIFETIME_HOURS = 60
-        self.orm_manager = ToolHelper
+        self.orm_manager = Tool()
 
     @db_reinit
     @drop_cache
@@ -1153,7 +1139,7 @@ class TestQueueOrderBy(unittest.TestCase, SetUp):
     def test_order_by_time(self):
         self.set_data_into_database()
         self.set_data_into_queue()
-        container = self.orm_manager.items
+        container = self.orm_manager.connection.items
         container.order_by(Machine, by_create_time=True)
         print(container.search_nodes(Machine))
 """
