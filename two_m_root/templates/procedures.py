@@ -19,7 +19,13 @@ def init_procedure(s: Session):
     s.commit()
 
 
+def init_procedures(s):
+    init_procedure(s)
+    ...
+    ...
+
+
 if __name__ == "__main__":
     engine = create_engine(DB_PATH)
     session = create_session(bind=engine)
-    # init_procedure(session)
+    init_procedures(session)

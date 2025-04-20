@@ -48,7 +48,13 @@
 
 ![settings](readme_images/settings.png)
 
-* Наконец можно приступить к использованию! Импортируем класс **Tool** и начнём работу!
+После написания таблиц в **models** и хранимых процедур в **procedures**, нужно инициализировать их в базу даных.
+
+<code>> python -c "from two_m.models import create_db;create_db()"</code>
+
+<code>> python -c "from two_m.procedures import init_procedures;init_procedures()"</code>
+
+* Наконец, можно приступить к использованию! Импортируем класс **Tool** и начнём работу!
 
 <code>
 
