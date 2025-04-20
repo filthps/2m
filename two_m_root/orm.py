@@ -27,21 +27,19 @@ from abc import ABC, abstractmethod, abstractproperty
 from weakref import ref, ReferenceType
 from typing import Union, Iterator, Iterable, Optional, Literal, Type, Any
 from collections import ChainMap
-from pymemcache.client.base import Client
-from pymemcache.client.retrying import RetryingClient
-from pymemcache.exceptions import MemcacheError
+from pymemcache.client.base import PooledClient
 from sqlalchemy import create_engine, delete, insert, text
 from sqlalchemy.sql.dml import Insert, Update, Delete
 from sqlalchemy.sql.expression import select
-from sqlalchemy.orm import Query, sessionmaker as session_factory, Session, scoped_session
-from sqlalchemy.exc import DisconnectionError, OperationalError, SQLAlchemyError
+from sqlalchemy.orm import Query, sessionmaker as session_factory, scoped_session
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from two_m_root.dill.serde import DillSerde
 from two_m_root.datatype import LinkedList, LinkedListItem
 from two_m_root.exceptions import *
 from two_m_root.database.postgres.exceptions import DatabaseException
 from two_m_root.conf import RESERVED_WORDS, CustomModel
 from two_m.main import MEMCACHE_PATH, DATABASE_PATH, RELEASE_INTERVAL_SECONDS, CACHE_LIFETIME_HOURS, \
-    MAX_RETRIES, WRAP_ITEM_MAX_LENGTH, ADD_TABLE_NAME_PREFIX, RETRYING_CLIENT_ATTEMPTS, RETRYING_CLIENT_RETRY_DELAY  # from user's package
+    MAX_RETRIES, WRAP_ITEM_MAX_LENGTH, ADD_TABLE_NAME_PREFIX  # from user's package
 
 
 class ORMAttributes:
@@ -1574,14 +1572,20 @@ class ServiceOrmContainer(Queue):
 
 
 class ConnectionManager:
-    CACHE_PATH = MEMCACHE_PATH
-    DATABASE_PATH = DATABASE_PATH
-    DATABASE_CONNECTION_ALIVE_SEC = 5
-    CACHE_CONNECTION_ALIVE_SEC = 5
+    """ Данный класс отвечает за установку соединений с базой данных и кеширующим сервером """
+    DATABASE_CONNECTION_ALIVE_SEC = 3
+    CACHE_CONNECTION_ALIVE_SEC = 3
     _database_connection_timer = None
     _cache_connection_timer = None
     _database_session = None
     _cache_client = None
+
+    def __new__(cls):
+        super().__new__(cls)
+        engine = create_engine(DATABASE_PATH)
+        cls.session_f = session_factory(bind=engine)
+        cls.cache_pool = PooledClient(MEMCACHE_PATH, max_pool_size=20, serde=DillSerde)
+        return cls
 
     @classmethod
     @property
@@ -1590,7 +1594,7 @@ class ConnectionManager:
             cls._cache_client = cls.__create_cache_connection()
             cls.__start_timer_cache_connection()
         return cls._cache_client
-    
+
     @classmethod
     def drop_cache(cls):
         cls.cache.flush_all()
@@ -1611,41 +1615,36 @@ class ConnectionManager:
 
     @classmethod
     def __create_cache_connection(cls):
-        return RetryingClient(
-            Client(cls.CACHE_PATH, serde=DillSerde),
-            attempts=RETRYING_CLIENT_ATTEMPTS,
-            retry_delay=RETRYING_CLIENT_RETRY_DELAY,
-            retry_for=[MemcacheError]
-        )
+        return cls.cache_pool
 
     @classmethod
     def __create_database_connection(cls):
-        engine = create_engine(cls.DATABASE_PATH)
-        session_f = session_factory(bind=engine)
-        return scoped_session(session_f)
+        return scoped_session(cls.session_f)
 
     @classmethod
     def __start_timer_database_connection(cls):
-        cls._database_connection_timer = threading.Timer(cls.DATABASE_CONNECTION_ALIVE_SEC,
-                                                         cls.__close_connection_database, args=(cls,))
+        cls._database_connection_timer = threading.Timer(float(cls.DATABASE_CONNECTION_ALIVE_SEC),
+                                                         cls.__close_connection_database)
+        cls._database_connection_timer.start()
 
     @classmethod
     def __start_timer_cache_connection(cls):
-        cls._cache_connection_timer = threading.Timer(cls.CACHE_CONNECTION_ALIVE_SEC, cls.__close_connection_cache,
-                                                      args=(cls,))
+        cls._cache_connection_timer = threading.Timer(float(cls.CACHE_CONNECTION_ALIVE_SEC), cls.__close_connection_cache)
+        cls._cache_connection_timer.start()
 
     @classmethod
     def __close_connection_database(cls):
-        cls._database_session.close()
+        cls._database_session.remove()
         cls._database_session = None
 
     @classmethod
     def __close_connection_cache(cls):
         cls._cache_client.close()
-        cls._cache_client = None
 
 
-class PrimaryKeyFactory(ModelTools, ConnectionManager):
+class PrimaryKeyFactory(ModelTools):
+    connection = ConnectionManager()
+
     @classmethod
     def create_primary(cls, model, **data) -> dict:
         cls.is_valid_model_instance(model)
@@ -1680,12 +1679,13 @@ class PrimaryKeyFactory(ModelTools, ConnectionManager):
         pk = cls._select_primary_key_value_from_node_data(model, data)
         if not pk == primary_key:
             raise NodePrimaryKeyError
-        select_result = cls.database.query(model).filter_by(**primary_key).all()
+        select_result = cls.connection.database.query(model).filter_by(**primary_key).all()
         if select_result:
             select_result = select_result[0].__dict__
             select_result.update(data)
             select_result = cls.__replace_insert_dml_on_update(select_result)
             return cls.__clear_node_data(model, select_result)
+        data = cls.__replace_insert_dml_on_insert(data)
         return data
 
     @classmethod
@@ -1697,7 +1697,7 @@ class PrimaryKeyFactory(ModelTools, ConnectionManager):
         unique_data = {key: data[key] for key in data if key in unique_columns}
         select_result = None
         if unique_data:
-            select_result = cls.database.query(model).filter_by(**unique_data).all()
+            select_result = cls.connection.database.query(model).filter_by(**unique_data).all()
         if select_result:
             select_result = select_result[0].__dict__
             select_result.update(data)
@@ -1711,7 +1711,7 @@ class PrimaryKeyFactory(ModelTools, ConnectionManager):
         unique_data = {key: data[key] for key in data if key in unique_columns}
         node = None
         if unique_data:
-            node = cls.items.search_nodes(model, **unique_data)
+            node = cls.connection.items.search_nodes(model, **unique_data)
         if not node:
             return data
         value = node[0].value
@@ -1733,7 +1733,7 @@ class PrimaryKeyFactory(ModelTools, ConnectionManager):
     def _get_highest_autoincrement_pk_from_local(cls, model) -> int:
         try:
             val = max(map(lambda x: x.get_primary_key_and_value(only_value=True),
-                          cls.items.search_nodes(model)))
+                          cls.connection.items.search_nodes(model)))
         except ValueError:
             return 1
         else:
@@ -1756,8 +1756,15 @@ class PrimaryKeyFactory(ModelTools, ConnectionManager):
         node_data.update({"_insert": False, "_update": True})
         return node_data
 
+    @staticmethod
+    def __replace_insert_dml_on_insert(node_data: dict):
+        if node_data["_delete"]:
+            return node_data
+        node_data.update({"_insert": True, "_update": False})
+        return node_data
 
-class Tool(ORMAttributes, ConnectionManager):
+
+class Tool(ORMAttributes):
     """
     Главный класс
     1) Инициализация
@@ -1777,6 +1784,7 @@ class Tool(ORMAttributes, ConnectionManager):
     _timer: Optional[threading.Timer] = None
     _model_obj: Optional[Type[CustomModel]] = None  # Текущий класс модели, присваиваемый автоматически всем экземплярам при добавлении в очередь
     _was_initialized = False
+    connection = ConnectionManager()
 
     @classmethod
     def set_model(cls, obj):
@@ -1797,7 +1805,7 @@ class Tool(ORMAttributes, ConnectionManager):
         cls.is_valid_model_instance(model)
         if not all((isinstance(v, (int, str, type(None))) for v in value.values())):
             raise NodeColumnValueError
-        items: Queue = cls.items
+        items: Queue = cls.connection.items
         items.LinkedListItem = QueueItem
         attrs = {"_model": model, "_ready": _ready,
                  "_insert": _insert, "_update": _update,
@@ -1821,14 +1829,14 @@ class Tool(ORMAttributes, ConnectionManager):
         def select_from_db():
             if not attrs:
                 try:
-                    items_db = cls.database.query(model).all()
+                    items_db = cls.connection.database.query(model).all()
                 except OperationalError:
                     print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
                           "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
                     raise OperationalError
             else:
                 try:
-                    items_db = cls.database.query(model).filter_by(**attrs).all()
+                    items_db = cls.connection.database.query(model).filter_by(**attrs).all()
                 except OperationalError:
                     print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
                           "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
@@ -1844,7 +1852,7 @@ class Tool(ORMAttributes, ConnectionManager):
             return add_to_queue()
 
         def select_from_cache():
-            return cls.items.search_nodes(model, **attrs)
+            return cls.connection.items.search_nodes(model, **attrs)
         return Result(get_nodes_from_database=select_from_db, get_local_nodes=select_from_cache,
                       only_local=_queue_only, only_database=_db_only, model=model, where=attrs)
 
@@ -1969,7 +1977,7 @@ class Tool(ORMAttributes, ConnectionManager):
 
         def collect_db_data():
             def create_request() -> str:  # O(n) * O(m)
-                s = f"orm_helper.database.query({', '.join(map(lambda x: x.__name__, models))}).filter("  # O(l) * O(1)
+                s = f"db.query({', '.join(map(lambda x: x.__name__, models))}).filter("  # O(l) * O(1)
                 on_keys_counter = 0
                 for left_table_dot_field, right_table_dot_field in _on.items():  # O(n)
                     s += f"{left_table_dot_field} == {right_table_dot_field}"
@@ -2001,12 +2009,12 @@ class Tool(ORMAttributes, ConnectionManager):
                         row.append(_model=join_select_result.__class__, _insert=True, _container=row, **r)  # O(l)
                     yield row
             sql_text = create_request()
-            query: Query = eval(sql_text, {"orm_helper": cls}, ChainMap(*list(map(lambda x: {x.__name__: x}, models)), {"select": select}))
+            query: Query = eval(sql_text, {"db": cls.connection.database}, ChainMap(*list(map(lambda x: {x.__name__: x}, models)), {"select": select}))
             return add_db_items_to_orm_queue()
 
         def collect_all_local_nodes():  # n**2!
             heap = Queue()
-            temp = cls.items
+            temp = cls.connection.items
             for model in models:  # O(n)
                 heap += temp.search_nodes(model, **where.get(model.__name__, {}))  # O(n * k)
             return heap
@@ -2062,7 +2070,7 @@ class Tool(ORMAttributes, ConnectionManager):
         if not isinstance(node_pk_value, (str, int,)):
             raise TypeError
         primary_key_field_name = ModelTools.get_primary_key_column_name(model)
-        left_node = cls.items.get_node(model, **{primary_key_field_name: node_pk_value})
+        left_node = cls.connection.items.get_node(model, **{primary_key_field_name: node_pk_value})
         return left_node.type if left_node is not None else None
 
     @classmethod
@@ -2077,7 +2085,7 @@ class Tool(ORMAttributes, ConnectionManager):
         if not isinstance(node_or_nodes, (tuple, list, set, frozenset, str, int,)):
             raise TypeError
         primary_key_field_name = ModelTools.get_primary_key_column_name(model)
-        items = cls.items
+        items = cls.connection.items
         if isinstance(node_or_nodes, (str, int,)):
             items.remove(model, **{primary_key_field_name: node_or_nodes})
         if isinstance(node_or_nodes, (tuple, list, set, frozenset)):
@@ -2100,7 +2108,7 @@ class Tool(ORMAttributes, ConnectionManager):
         if not isinstance(field_or_fields, (tuple, list, set, frozenset, str,)):
             raise TypeError
         primary_key_field_name = ModelTools.get_primary_key_column_name(model)
-        old_node = cls.items.get_node(model, **{primary_key_field_name: pk_field_value})
+        old_node = cls.connection.items.get_node(model, **{primary_key_field_name: pk_field_value})
         if not old_node:
             return
         node_data = old_node.get_attributes()
@@ -2119,7 +2127,7 @@ class Tool(ORMAttributes, ConnectionManager):
                 raise NodePrimaryKeyError("Нельзя удалить поле, которое является первичным ключом")
             if field_or_fields in node_data:
                 del node_data[field_or_fields]
-        container = cls.items
+        container = cls.connection.items
         container.enqueue(**node_data)
         cls.__set_cache(container)
 
@@ -2127,7 +2135,7 @@ class Tool(ORMAttributes, ConnectionManager):
     def is_node_from_cache(cls, _model=None, **attrs) -> bool:
         model = _model or cls._model_obj
         cls.is_valid_model_instance(model)
-        items = cls.items.search_nodes(model, **attrs)
+        items = cls.connection.items.search_nodes(model, **attrs)
         if len(items) > 1:
             warnings.warn(f"Нашлось больше одной ноды/нод, - {len(items)}: {items}")
         if items:
@@ -2138,7 +2146,7 @@ class Tool(ORMAttributes, ConnectionManager):
     def is_node_ready(cls, _model=None, **attrs):
         model = _model or cls._model_obj
         cls.is_valid_model_instance(model)
-        items = cls.items.search_nodes(model, **attrs)
+        items = cls.connection.items.search_nodes(model, **attrs)
         if not items:
             return
         if not len(items) == 1:
@@ -2152,15 +2160,20 @@ class Tool(ORMAttributes, ConnectionManager):
         путём итерации по ним, и попыткой сохранить в базу данных.
         :return: None
         """
+        updated_remaining_nodes = Queue()
+
         def actualize_node_data(remaining_nodes: Queue):
             """ Обновить данные нод, которые не удалось закоммитить, из базы данных """
-            updated_remaining_nodes = Queue()
-            [updated_remaining_nodes.append(**PrimaryKeyFactory.create_primary(node.model, **node.get_attributes()))
+            [updated_remaining_nodes.append(
+                **PrimaryKeyFactory.create_primary(node.model,
+                                                   **node.get_attributes(with_update={
+                                                       "_container": updated_remaining_nodes
+                                                   }))
+                                            )
              for node in remaining_nodes]
             return updated_remaining_nodes
-        database_adapter = SQLAlchemyQueryManager(cls.DATABASE_PATH, cls.items)
+        database_adapter = SQLAlchemyQueryManager(DATABASE_PATH, cls.connection.items)
         database_adapter.start()
-
         cls.__set_cache(actualize_node_data(database_adapter.remaining_nodes))
         sys.exit()
 
@@ -2182,13 +2195,12 @@ class Tool(ORMAttributes, ConnectionManager):
             raise ORMInitializationError("Срок жизни кеша, который хранит очередь сохраняемых объектов не может быть меньше, "
                                          "чем интервал отправки объектов в базу данных.")
         cls._was_initialized = True
-        #  cls.drop_cache()
 
     @classmethod
     def __set_cache(cls, nodes):
         if nodes is None:
             raise TypeError("Покытка установить в кеш None вместо ORMQueue. Это недопустимо")
-        cls.cache.set("ORMItems", nodes, cls.CACHE_LIFETIME_HOURS)
+        cls.connection.cache.set("ORMItems", nodes, cls.CACHE_LIFETIME_HOURS)
 
     @staticmethod
     def __detect_primary_key(model, value: dict):
@@ -2218,17 +2230,17 @@ class ResultCacheTools(Tool):
     def _set_hash(self, nodes):
         self.__is_valid_nodes(nodes)
         hash_sum = set(map(str, map(hash, nodes)))
-        self.cache.set(self.__key, hash_sum)
+        self.connection.cache.set(self.__key, hash_sum)
         self._add_to_all_nodes_hash_has_been_in_result(hash_sum)
 
     def _add_hash_item(self, value):
         self.__is_valid_hash_key(value)
         current_hash = self._get_hash()
         current_hash.add(value)
-        self.cache.set(self.__key, current_hash)
+        self.connection.cache.set(self.__key, current_hash)
 
     def _get_hash(self) -> set[str]:
-        return self.cache.get(self.__key, set())
+        return self.connection.cache.get(self.__key, set())
 
     def _is_node_hash_has_been_in_result(self, value):
         """ Была ли данная нода(её хеш-сумма) в результатах когда-либо ранее"""
@@ -2239,29 +2251,29 @@ class ResultCacheTools(Tool):
         [self.__is_valid_hash_key(i) for i in items]
         checked = self.__get_all_nodes_has_been_in_result()
         checked.update(items)
-        self.cache.set(f"{self.__key}-all", checked)
+        self.connection.cache.set(f"{self.__key}-all", checked)
 
     def _is_hash_from_checked(self, val):
-        return val in self.cache.get(f"{self.__key}-checked", set())
+        return val in self.connection.cache.get(f"{self.__key}-checked", set())
 
     def _add_hash_to_checked(self, values):
         [self.__is_valid_hash_key(n) for n in values]
         checked = self._get_checked_hash_items()
         checked.update(values)
-        self.cache.set(f"{self.__key}-checked", checked)
+        self.connection.cache.set(f"{self.__key}-checked", checked)
 
     def _get_checked_hash_items(self):
-        return self.cache.get(f"{self.__key}-checked", set())
+        return self.connection.cache.get(f"{self.__key}-checked", set())
 
     def _set_primary_keys(self, nodes):
         self.__is_valid_nodes(nodes)
-        self.cache.set(f"{self.__key}-pk", set(map(str, map(lambda x: x.hash_by_pk, nodes))))
+        self.connection.cache.set(f"{self.__key}-pk", set(map(str, map(lambda x: x.hash_by_pk, nodes))))
 
     def _get_primary_keys_hash(self) -> set[str]:
-        return self.cache.get(f"{self.__key}-pk", set())
+        return self.connection.cache.get(f"{self.__key}-pk", set())
 
     def __get_all_nodes_has_been_in_result(self) -> set:
-        return self.cache.get(f"{self.__key}-all", set())
+        return self.connection.cache.get(f"{self.__key}-all", set())
 
     @staticmethod
     def __is_valid_hash_key(hash_key):
@@ -2660,10 +2672,10 @@ class PointerCacheTools(Tool):
                 if not values[1].isdigit() or not values[2].isdigit():
                     raise TypeError
         is_valid()
-        self.cache.set(self.__cache_key, ",".join(items), self.CACHE_LIFETIME_HOURS)
+        self.connection.cache.set(self.__cache_key, ",".join(items), self.CACHE_LIFETIME_HOURS)
 
     def _replace_pointer_cache_item(self, primary_key_hash: str, new_hash_sum: str):
-        data = self.cache.get(self.__cache_key, None)
+        data = self.connection.cache.get(self.__cache_key, None)
         if data is None:
             return
         item_str = None
@@ -2676,7 +2688,7 @@ class PointerCacheTools(Tool):
                 break
         if item_str is not None:
             all_items[index] = item_str
-        self.cache.set(self.__cache_key, ",".join(all_items))
+        self.connection.cache.set(self.__cache_key, ",".join(all_items))
 
     def _get_primary_keys_hash(self) -> Iterator[str]:
         return self.__parse_cache_items(1)
@@ -2688,10 +2700,12 @@ class PointerCacheTools(Tool):
         return self.__parse_cache_items(0)
 
     def __parse_cache_items(self, val_index):
-        data = self.cache.get(self.__cache_key, None)
+        data = self.connection.cache.get(self.__cache_key, None)
         if data is None:
             return
         for item in data.split(","):
+            if not item:
+                return
             yield item.split(":")[val_index]
 
     @abstractmethod
