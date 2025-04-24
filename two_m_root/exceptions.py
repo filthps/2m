@@ -52,7 +52,7 @@ class NodeError(ORMException):
 
 class NodePrimaryKeyError(NodeError):
     def __init__(self,
-                 text="Неверно указан первичный ключ, который, как и его значение должен содержаться в словаре value"):
+                 text="Неверно указан первичный ключ, который, как и его значение, должен содержаться в словаре value"):
         super().__init__(text)
 
 
