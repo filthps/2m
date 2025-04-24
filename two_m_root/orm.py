@@ -28,9 +28,9 @@ from weakref import ref, ReferenceType
 from typing import Union, Iterator, Iterable, Optional, Literal, Type, Any
 from collections import ChainMap
 from pymemcache.client.base import PooledClient
-from sqlalchemy import create_engine, delete, insert, text
+from sqlalchemy import create_engine, delete, insert, update, text, select
+from sqlalchemy.sql.expression import func
 from sqlalchemy.sql.dml import Insert, Update, Delete
-from sqlalchemy.sql.expression import select
 from sqlalchemy.orm import Query, sessionmaker as session_factory, scoped_session
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from two_m_root.dill.serde import DillSerde
@@ -43,16 +43,11 @@ from two_m.main import MEMCACHE_PATH, DATABASE_PATH, RELEASE_INTERVAL_SECONDS, C
 
 
 class ORMAttributes:
-    @classmethod
-    def is_valid_node(cls, node: Union["QueueItem", "ServiceOrmItem", "ResultORMItem"]):
-        if not isinstance(node, (ServiceOrmItem, QueueItem, ResultORMItem,)):
-            raise TypeError
-        cls.is_valid_model_instance(node.model)
 
     @staticmethod
     def is_valid_model_instance(item):
         if isinstance(item, (int, str, float, bytes, bytearray, set, dict, list, tuple, type(None))):
-            raise InvalidModel
+            raise InvalidModel(f"type - {type(item)}")
         if hasattr(item, "__new__"):
             item = item()  # __new__
             if not hasattr(item, "column_names"):
@@ -65,21 +60,6 @@ class ORMAttributes:
 
 
 class ModelTools(ORMAttributes):
-    def get_required_columns(self, model: Type[CustomModel], values_data: Optional[dict] = None) -> frozenset[str]:
-        self.is_valid_model_instance(model)
-        primary_key = self.get_primary_key_column_name(model)
-        if values_data is not None:
-            if type(values_data) is not dict:
-                raise TypeError
-        else:
-            values_data = {}
-        columns_that_should_be_with_data = frozenset(self.get_nullable_columns(model,  nullable=False)).intersection(
-            frozenset(self.get_column_names_with_default_procedure_or_value(model, has_default=False)))
-        columns_that_should_be_with_data -= frozenset(values_data)
-        return columns_that_should_be_with_data.union(
-            frozenset([primary_key] if not self.is_autoincrement_primary_key(model) and primary_key not in values_data else [])
-        )
-
     @classmethod
     def is_autoincrement_primary_key(cls, model: Type[CustomModel]) -> bool:
         cls.is_valid_model_instance(model)
@@ -88,8 +68,9 @@ class ModelTools(ORMAttributes):
                 return True
         return False
 
-    def get_primary_key_python_type(self, model: Type[CustomModel]) -> Type:
-        self.is_valid_model_instance(model)
+    @classmethod
+    def get_primary_key_python_type(cls, model: Type[CustomModel]) -> Type:
+        cls.is_valid_model_instance(model)
         for column_name, data in model().column_names.items():
             if data["primary_key"]:
                 return data["type"]
@@ -164,27 +145,67 @@ class ModelTools(ORMAttributes):
             raise InvalidModel(f"Класс-модель '{name}' в модуле models не найден")
         return model_instance
 
-    @classmethod
-    def _check_unique_values(cls, node) -> bool:
-        """ Валидация на предмет нарушения уникальности в полях разных нод """
-        unique_fields = cls.get_unique_columns(node.model, node.value)
-        for unique_field in unique_fields:
-            if unique_field not in node.value:
-                continue
-            value = node.value[unique_field]
-            if not node.container:
-                return True  # Ожидается, что ленивая ссылка умрёт, если в контейнере оставался 1 элемент
-            for n in node.container:
-                if n.model.__name__ == node.model.__name__:
-                    if unique_field in n.value:
-                        if n.value[unique_field] == value:
-                            return False
-        return True
+
+class NodeTools:
+    """
+    Средства валидации для всех объектов, производных от QueueItem
+    """
 
     @staticmethod
-    def _check_not_null_fields_in_node_value(node: "QueueItem") -> bool:
+    def _is_valid_primary_key(d: dict, model: CustomModel):
+        if not isinstance(d, dict):
+            raise TypeError
+        if not d:
+            raise NodePrimaryKeyError
+        ModelTools.is_valid_model_instance(model)
+        primary_key_column_name = ModelTools.get_primary_key_column_name(model)
+        if primary_key_column_name not in d:
+            raise NodePrimaryKeyError("Столбец первичного не обнаружен!")
+        if not isinstance(d[primary_key_column_name], (int, str,)):
+            raise NodePrimaryKeyError
+
+    @staticmethod
+    def _is_valid_column_type_in_sql_type(node: "QueueItem"):
+        """ Проверить соответствие данных в ноде на предмет типизации.
+         Если тип данных отличается от табличного в БД, то возбудить исключение"""
+        data = node.model().column_names
+        for column_name in data:
+            if column_name not in node.value:
+                continue
+            if not isinstance(node.value[column_name], data[column_name]["type"]):
+                if node.value[column_name] is None and data[column_name]["nullable"]:
+                    continue
+                raise NodeColumnValueError(text=f"Столбец {column_name} должен быть производным от "
+                                                f"{str(data[column_name]['type'])}, "
+                                                f"по факту {type(node.value[column_name])}")
+
+    @staticmethod
+    def _field_names_validation(node, values: dict):
+        """ Соотнести все столбцы ноды в словаре value со столбцами из класса Model """
+        if type(values) is not dict:
+            raise TypeError
+        if not isinstance(node, (ServiceOrmItem, QueueItem,)):
+            raise TypeError
+        for name in values:
+            if not isinstance(values[name], (str, int, bool, float, bytes, bytearray, type(None),)):
+                raise NodeColumnValueError(values[name])
+        any_ = set(values) - set(node.model().column_names)
+        if any_:
+            raise NodeColumnError(any_, model_name=node.model.__name__)
+
+    @staticmethod
+    def _is_valid_dml_type(*dml):
+        if not len(dml) == 3:
+            raise ValueError
+        if not all(map(lambda i: type(i) is bool, dml)):
+            raise TypeError
+        if not sum(dml) == 1:
+            raise NodeDMLTypeError
+
+    @staticmethod
+    def _check_not_null_fields_in_node_value(node: "QueueItem"):
         """ Проверить все поля на предмет nullable """
-        model_attributes: dict[dict] = node.model().column_names
+        model_attributes = node.model().column_names
         for k, attributes in model_attributes.items():
             if not attributes["nullable"]:
                 if k not in node.value:
@@ -193,99 +214,31 @@ class ModelTools(ORMAttributes):
                     return False
         return True
 
-    @staticmethod
-    def _is_valid_column_type_in_sql_type(node: "QueueItem") -> bool:
-        """ Проверить соответствие данных в ноде на предмет типизации.
-         Если тип данных отличается от табличного в БД, то возбудить исключение"""
-        data = node.model().column_names
-        for column_name in node.value:
-            if column_name not in data:
-                return False
-            if not isinstance(node.value[column_name], data[column_name]["type"]):
-                if node.value[column_name] is None and data[column_name]["nullable"]:
-                    continue
-                raise NodeColumnValueError(text=f"Столбец {column_name} должен быть производным от "
-                                                f"{str(data[column_name]['type'])}, "
-                                                f"по факту {type(node.value[column_name])}")
-        return True
-
-
-class NodeTools:
-    @staticmethod
-    def is_valid_primary_key(d: dict, model: CustomModel):
-        ModelTools.is_valid_model_instance(model)
-        primary_key = ModelTools.get_primary_key_column_name(model)
-        if primary_key not in d:
-            raise NodePrimaryKeyError("Столбец первичного не обнаружен!")
-        if not isinstance(d[primary_key], (int, str,)):
-            raise NodePrimaryKeyError
-
-
-class QueueSearchTools:
-    """ Инструменты для поиска нод. Поиск идентичных [переданной] нод в указанном контейнере. """
-    @classmethod
-    def get_node_by_unique_fields(cls, queue, right_node):
-        nodes = queue.__class__()
-        cls.__is_valid(queue, right_node)
-        unique_columns_at_cur_table = tuple(ModelTools.get_unique_columns(right_node.model, right_node.value))
-        if not unique_columns_at_cur_table:
-            return
-        unique_columns_in_node = set(right_node.value) & set(unique_columns_at_cur_table)
-        if not unique_columns_in_node:
-            return
-        for left_node in queue:
-            if not left_node.model.__name__ == right_node.model.__name__:
-                continue
-            matched = set(left_node.value) & unique_columns_in_node
-            for k in matched:
-                if right_node.value[k] == left_node.value[k]:
-                    nodes.enqueue(**left_node.get_attributes(new_container=nodes))
-        if nodes:
-            if len(nodes) > 1:
-                raise ORMException
-            return nodes[0]
-
-    @staticmethod
-    def __is_valid(queue, node):
-        ORMAttributes.is_valid_model_instance(node.model)
-        if not isinstance(queue, (Queue, ServiceOrmContainer, ResultORMCollection,)):
-            raise TypeError
-
 
 class QueueItem(LinkedListItem, ModelTools, NodeTools):
     """ Иммутабельный класс ноды для Queue. Нода для инъекции в базу. """
-    def __init__(self, _container=None, _insert=False, _update=False,
-                 _delete=False, _model=None, _where=None, _create_at=None, _count_retries=0, **kw):
-        self._container: ReferenceType[Union["Queue", "ServiceOrmContainer"]] = ref(_container)
+    def __init__(self, _insert=False, _update=False, _delete=False,
+                 _model=None, _create_at=None, _count_retries=0, _ready=False,  **node_data):
+        super().__init__(**node_data)
         self.__model: CustomModel = _model
         self.is_valid_model_instance(self.__model)
-        self._is_valid_container(_container)
         self.__insert = _insert
         self.__update = _update
         self.__delete = _delete
-        self.__is_ready = kw.pop("_ready", True if self.__delete else False)
-        self.__where = _where
+        self.__is_ready = _ready
         self._create_at = _create_at if _create_at is not None else datetime.datetime.now()
         self.__transaction_counter = _count_retries  # Инкрементируется при вызове self.make_query()
         # Подразумевая тем самым, что это попытка сделать транзакцию в базу
-        super().__init__(**kw)
-        self.__foreign_key_fields = self.get_foreign_key_columns(self.__model)
-        self.__is_valid_dml_type()
-        self._field_names_validation()
-        self.is_valid_primary_key(self._val, self.__model)
         primary_key = ModelTools.get_primary_key_column_name(self.__model)
-        self.__primary_key = {primary_key: self._val[primary_key]}
-        _ = self.ready
-
-    @property
-    def container(self) -> "Queue":
-        return self._container()
-
-    @container.setter
-    def container(self, cnt):
-        if type(cnt) is not Queue:
-            raise TypeError
-        self._container = ref(cnt)
+        try:
+            self.__primary_key = {primary_key: self._val[primary_key]}
+        except KeyError:
+            raise NodePrimaryKeyError("Первичный ключ не передан в ноду")
+        self._is_valid_dml_type(self.__insert, self.__update, self.__delete)
+        self._field_names_validation(self, self.value)
+        self._is_valid_column_type_in_sql_type(self)
+        self._is_valid_primary_key(self.__primary_key, self.__model)
+        self.__foreign_key_fields = self.get_foreign_key_columns(self.__model)
 
     @property
     def model(self):
@@ -303,86 +256,49 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
         return value
 
     def get_primary_key_and_value(self, as_tuple=False, only_key=False, only_value=False) -> Union[dict, tuple, int, str]:
-        """
-        :param as_tuple: ключ-значение в виде кортежа
-        :param only_key: только название столбца - PK
-        :param only_value: только значение столбца первичного ключа
-        """
         if only_key:
             return tuple(self.__primary_key.keys())[0]
         if only_value:
             return tuple(self.__primary_key.values())[0]
-        return tuple(self.__primary_key.items())[0] if as_tuple else self.__primary_key
+        return tuple(self.__primary_key.items())[0] if as_tuple else self.__primary_key.copy()
 
     @property
     def created_at(self):
         return self._create_at
 
     @property
-    def where(self) -> dict:
-        return self.__where.copy() if self.__where else {}
-
-    @property
     def ready(self) -> bool:
-        self.__is_ready = self._is_valid_column_type_in_sql_type(self)
-        self.__is_ready = self._check_unique_values(self) if self.__is_ready else False
-        if self.__insert:
-            self.__is_ready = self._check_not_null_fields_in_node_value(self) if self.__is_ready else False
+        if self.__delete:
+            return self.__is_ready
+        self.__is_ready = self._check_not_null_fields_in_node_value(self)
         return self.__is_ready
 
-    @ready.setter
-    def ready(self, status: bool):
-        if not isinstance(status, bool):
-            raise NodeAttributeError("Статус готовности - это тип данных boolean")
-        self.container.enqueue(**{**self.get_attributes(), "_ready": status})
 
     @property
     def type(self) -> str:
         return "_insert" if self.__insert else "_update" if self.__update else "_delete"
 
-    def get_attributes(self, with_update: Optional[dict] = None, new_container: Optional["Queue"] = None) -> dict:
+    def get_attributes(self, with_update: Optional[dict] = None) -> dict:
         if with_update is not None and type(with_update) is not dict:
             raise TypeError
-        if new_container:
-            if self.container is not None:
-                if not isinstance(new_container, type(self.container)):
-                    raise TypeError
         result = {"_create_at": self.created_at}
         result.update(self.value)
-        if self.__update or self.__delete:
-            if self.__where:
-                result.update({"_where": self.where})
         result.update({"_model": self.__model, "_insert": False,
                        "_update": False, "_ready": self.__is_ready,
                        "_delete": False, "_count_retries": self.retries})
-        result.update({"_container": self.container}) if self.container is not None else None
         result.update({self.type: True})
         result.update(with_update) if with_update else None
-        if new_container is not None:
-            result.update({"_container": new_container})
         return result
 
     def make_query(self) -> Optional[Query]:
         query = None
-        value: dict = self.value
-        primary_key = self.get_primary_key_and_value(only_key=True)
-        where = self.__where
-        if ModelTools.is_autoincrement_primary_key(self.__model):
-            del value[primary_key]
-            where = value if not where else where
-        else:
-            where = where if where else self.get_primary_key_and_value()
+        primary_key, pk_value = self.get_primary_key_and_value(as_tuple=True)
         if self.__insert:
-            query = insert(self.model).values(**value)
-        if self.__update or self.__delete:
-            query = Tool.database.query(self.model).filter_by(**where).first()
-            if query is not None:
-                if self.__update:
-                    [setattr(query, key, value) for key, value in value.items()]
-                if self.__delete:
-                    query = delete(self.model).where(text(
-                        ", ".join(map(lambda x: f"{self.model.__tablename__}.{x[0]}='{x[1]}'", value.items()))
-                    ))
+            query = insert(self.model).values(**self.value)
+        if self.__update:
+            query = update(self.model).where(text(f"{self.model.__tablename__}.{primary_key}={pk_value}")).values(**self.value)
+        if self.__delete:
+            query = delete(self.model).where(text(f"{self.model.__tablename__}.{primary_key}={pk_value}"))
         self.__transaction_counter += 1
         return query
 
@@ -421,8 +337,6 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
     def __str__(self):
         attributes = self.get_attributes()
         create_at = attributes.pop("_create_at")
-        if "_container" in attributes:
-            del attributes["_container"]
         attributes.update({"_create_at": create_at.strftime("%d:%m:%S")})
         return ', '.join(map(lambda i: '='.join([str(e) for e in i]), attributes.items()))
 
@@ -439,34 +353,6 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
         if item not in self.value:
             raise KeyError
         return self.value[item]
-
-    def _field_names_validation(self, from_polymorphizm=False) -> Optional[set[str]]:
-        """ соотнести все столбцы ноды в словаре value со столбцами из класса Model """
-        def clear_names():
-            """ Tool могла добавить префиксы вида 'ModelClassName.column_name', очистить имена от них """
-            value = (k[k.index(".") + 1:] if "." in k else k for k in self.value)
-            return value
-        for name in clear_names():
-            if not isinstance(self.value[name], (str, int, bool, float, bytes, bytearray, type(None),)):
-                raise NodeColumnValueError(self.value[name])
-        any_ = set(clear_names()) - set(self.model().column_names)
-        if any_:
-            if from_polymorphizm:
-                return any_
-            raise NodeColumnError(any_, model_name=self.model.__name__)
-
-    @staticmethod
-    def _is_valid_container(container):
-        if type(container) is not Queue:
-            raise TypeError(f"Вмето контейнера класса Queue, который предназначен под ноды этого типа, "
-                            f"задан контейнер - {type(container).__name__}")
-
-    def __is_valid_dml_type(self):
-        if not isinstance(self.__insert, bool) or not isinstance(self.__update, bool) or \
-                not isinstance(self.__delete, bool):
-            raise TypeError
-        if not sum((self.__insert, self.__update, self.__delete,)) == 1:
-            raise NodeDMLTypeError
 
 
 class EmptyOrmItem(LinkedListItem):
@@ -630,7 +516,7 @@ class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
         self.is_valid_model_instance(self._model)
         if not self.value:
             raise ValueError
-        self.is_valid_primary_key(self._primary_key, self._model)
+        self._is_valid_primary_key(self._primary_key, self._model)
 
     @staticmethod
     def __is_valid_column_names_arg(names: tuple):
@@ -646,7 +532,7 @@ class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
             raise ValueError
 
 
-class Queue(LinkedList, QueueSearchTools):
+class Queue(LinkedList):
     """
     Очередь на основе связанного списка.
     Управляется через адаптер Tool.
@@ -663,26 +549,11 @@ class Queue(LinkedList, QueueSearchTools):
 
     def enqueue(self, **attrs):
         """ Установка ноды в конец очереди с хитрой логикой проверки на совпадение. """
-        def remove_other_foreign_key_value():
-            """ Если в очереди есть нода, той же модели, что и добавляемая.
-             Если у старой и добавляемой ноды есть одно и то же значение внешнего ключа,
-             то из найденной в очереди ноды это значение нужно убрать"""
-            for node in self:
-                if not new_item.model.__name__ == node.model.__name__:
-                    continue
-                all_foreign_key_columns = frozenset(ModelTools.get_foreign_key_columns(node.model))
-                current_fk_values = frozenset(node.value) & all_foreign_key_columns & frozenset(new_item.value)
-                for fk_name in current_fk_values:
-                    if node.value[fk_name] == new_item.value[fk_name]:
-                        new_values = node.get_attributes()
-                        del new_values[fk_name]
-                        self._remove_from_queue(node)
-                        self.append(**new_values)
-                        break
-
         exists_item, new_item = self._replication(**attrs)
         self._remove_from_queue(exists_item) if exists_item else None
-        remove_other_foreign_key_value()
+        self._remove_other_node_with_current_foreign_key_value(new_item)
+        self._check_primary_key_unique(new_item)
+        self._check_unique_values(new_item)
         self.append(**new_item.get_attributes())
 
     def dequeue(self) -> Optional[QueueItem]:
@@ -744,7 +615,7 @@ class Queue(LinkedList, QueueSearchTools):
                 return items
             if left_node.model.__name__ == model.__name__:  # O(u * k)
                 if not _filter and not negative_selection:
-                    items.append(**left_node.get_attributes(new_container=items))
+                    items.append(**left_node.get_attributes())
                 for field_name, value in _filter.items():
                     if field_name in left_node.value:
                         if negative_selection:
@@ -753,7 +624,7 @@ class Queue(LinkedList, QueueSearchTools):
                                     items.append(**left_node.get_attributes())
                                 continue
                             if not left_node.value[field_name] == value:
-                                items.append(**left_node.get_attributes(new_container=items))
+                                items.append(**left_node.get_attributes())
                                 break
                         else:
                             if value == "*":
@@ -761,7 +632,7 @@ class Queue(LinkedList, QueueSearchTools):
                                     items.append(**left_node.get_attributes())
                                     continue
                             if left_node.value[field_name] == value:
-                                items.append(**left_node.get_attributes(new_container=items))
+                                items.append(**left_node.get_attributes())
                                 break
         return items
 
@@ -802,8 +673,8 @@ class Queue(LinkedList, QueueSearchTools):
         if not type(other) is self.__class__:
             raise TypeError
         result_instance = self.__class__()
-        [result_instance.append(**n.get_attributes(new_container=result_instance)) for n in self]  # O(n)
-        [result_instance.enqueue(**n.get_attributes(new_container=result_instance)) for n in other]  # O(n**2) todo n**2!
+        [result_instance.append(**n.get_attributes()) for n in self]  # O(n)
+        [result_instance.enqueue(**n.get_attributes()) for n in other]  # O(n**2) todo n**2!
         return result_instance
 
     def __iadd__(self, other):
@@ -857,15 +728,11 @@ class Queue(LinkedList, QueueSearchTools):
 
         def merge(old_node: QueueItem, new_node: QueueItem, dml_type: str) -> QueueItem:
             new_node_data = old_node.get_attributes()
-            old_where, new_where = old_node.where, new_node.where
-            old_where.update(new_where)
-            new_node_data.update({"_where": old_where})
             old_value, new_value = old_node.value, new_node.value
             old_value.update(new_value)
             new_node_data.update(old_value)
             new_node_data.update({"_insert": False, "_update": False, "_delete": False})
             new_node_data.update({dml_type: True, "_ready": new_node.ready})
-            new_node_data.update({"_container": self})
             new_node_data.update({"_create_at": new_node.created_at})
             return self.LinkedListItem(**new_node_data)
 
@@ -897,6 +764,56 @@ class Queue(LinkedList, QueueSearchTools):
         if type(left_node) is not self.LinkedListItem:
             raise TypeError
         del self[left_node.index]
+
+    def _check_unique_values(self, node):
+        """
+        Валидация на предмет нарушения уникальности в полях разных нод
+        :param node: Инициализированная для добавления нода
+        :return: None
+        """
+        if type(node) is not self.LinkedListItem:
+            raise TypeError
+        if not self:
+            return
+        unique_fields = ModelTools.get_unique_columns(node.model, node.value)
+        for unique_field in unique_fields:
+            if unique_field not in node.value:
+                continue
+            value = node.value[unique_field]
+            for n in self:
+                if n.model.__name__ == node.model.__name__:
+                    if unique_field in n.value:
+                        if n.value[unique_field] == value:
+                            raise NodeColumnValueError
+
+    def _check_primary_key_unique(self, node):
+        if not isinstance(node, self.LinkedListItem):
+            raise TypeError
+        if not self:
+            return
+        all_primary_keys = [n.get_primary_key_and_value(only_value=True) for n in self
+                            if node.model.__name__ == n.model.__name__]
+        if all_primary_keys.count(node.get_primary_key_and_value(only_value=True)) > 1:
+            raise NodePrimaryKeyError("Нарушение уникальности первичных ключей в очереди. Первичный ключ повторяется.")
+
+    def _remove_other_node_with_current_foreign_key_value(self, node):
+        """ Если в очереди есть нода, той же модели, что и добавляемая,
+         если у старой и добавляемой ноды есть одно и то же значение внешнего ключа,
+         то из найденной в очереди ноды это значение нужно убрать
+         Простыми словами: 2 ноды не могут ссылаться своими внешними ключами на какую-то одну ноду
+         """
+        for ex_node in self:
+            if not node.model.__name__ == ex_node.model.__name__:
+                continue
+            all_foreign_key_columns = frozenset(ModelTools.get_foreign_key_columns(node.model))
+            current_fk_values = frozenset(node.value) & all_foreign_key_columns & frozenset(ex_node.value)
+            for fk_name in current_fk_values:
+                if node.value[fk_name] == ex_node.value[fk_name]:
+                    new_values = ex_node.get_attributes()
+                    del new_values[fk_name]
+                    self._remove_from_queue(ex_node)
+                    self.append(**new_values)
+                    break
 
 
 class ResultORMCollection:
@@ -1438,7 +1355,7 @@ class SQLAlchemyQueryManager:
             return
         if not self._query_objects:
             return
-        session = Tool.database
+        session = Tool.connection.database
         while sorted_data:
             node_group = sorted_data.pop(-1)
             if not node_group:
@@ -1498,44 +1415,27 @@ class SQLAlchemyQueryManager:
                     recursion_result = make_sort_container(node_, Queue())
                     self._sorted.append(recursion_result)
                 else:
-                    self.remaining_nodes.append(**node_.get_attributes(new_container=self.remaining_nodes))
+                    self.remaining_nodes.append(**node_.get_attributes())
             node_ = self._node_items.dequeue()
         return self._sorted
 
 
 class ServiceOrmItem(QueueItem):
-    def get(self, name, default_val=None):
-        try:
-            result = self.__getitem__(name)
-        except KeyError:
-            return default_val
-        return result
-
     @property
     def hash_by_pk(self):
         str_ = "".join(map(str, self.get_primary_key_and_value(as_tuple=True)))
         return int.from_bytes(hashlib.md5(str_.encode("utf-8")).digest(), "big")
 
-    def _field_names_validation(self):
-        column_names = set(self.model().column_names)
-        loss_fields = super()._field_names_validation(from_polymorphizm=True)
-        while loss_fields and column_names:
-            field = loss_fields.pop()
-            if f"{self.model.__name__}.{field}" not in column_names:
-                if field not in column_names:
-                    loss_fields.add(field)
-            column_names.remove(field)
-        if loss_fields:
-            raise NodeColumnError
-
-    @classmethod
-    def _is_valid_container(k, item):
-        if not isinstance(item, ServiceOrmContainer):
-            raise TypeError(f"Данная нода должна быть в {k.__name__}, а не в {type(item).__name__}")
+    @staticmethod
+    def _field_names_validation(node, values_d: dict):
+        def clear_names():
+            """ Префиксы вида 'ModelClassName.column_name'. Очистить имена столбцов от них """
+            value = {(k[k.index(".") + 1:] if "." in k else k): v for k, v in values_d.items()}
+            return value
+        return super()._field_names_validation(node, clear_names())
 
 
 class ServiceOrmContainer(Queue):
-    """ Данный контейнер для использования в JoinSelectResult (результат вызова Tool.join_select) """
     LinkedListItem: Union[ServiceOrmItem, ResultORMItem] = ServiceOrmItem
 
     @property
@@ -1648,13 +1548,23 @@ class PrimaryKeyFactory(ModelTools):
     @classmethod
     def create_primary(cls, model, **data) -> dict:
         cls.is_valid_model_instance(model)
+        name = cls.get_primary_key_column_name(model)
         pk = cls._select_primary_key_value_from_node_data(model, data)
         if pk is not None:
-            data = cls._update_node_data_from_database_by_pk(model, pk, data)
+            pk_from_db = cls._get_highest_autoincrement_pk_from_database(model)
+            if pk_from_db is not None:
+                if pk_from_db >= pk[name]:
+                    data = cls._update_node_data_from_database_by_pk(model, pk, data)
+                    data.update(data)
             return data
         data = cls._update_node_data_from_database_by_unique_column(model, data)
+        if name in data:
+            pk = {name: data[name]} if data else None
+            data = cls._update_node_data_from_local_nodes_by_unique_column(model, data)
+            del data[name]
+            data.update(pk)
+            return data
         data = cls._update_node_data_from_local_nodes_by_unique_column(model, data)
-        name = cls.get_primary_key_column_name(model)
         if name in data:
             return data
         default_value = cls.get_default_column_value_or_function(model, name)
@@ -1662,10 +1572,18 @@ class PrimaryKeyFactory(ModelTools):
             data.update({name: default_value.arg(None)})
             return data
         if cls.is_autoincrement_primary_key(model):
-            autoincrement_value = cls._get_highest_autoincrement_pk_from_local(model)
-            pk = {name: autoincrement_value}
-            data.update(pk)
-            data = cls._update_node_data_from_database_by_pk(model, pk, data)
+            pk_value_db = cls._get_highest_autoincrement_pk_from_database(model)
+            pk_value_local = cls._get_highest_autoincrement_pk_from_local(model)
+            if pk_value_local and pk_value_db:
+                data.update({name: pk_value_local + pk_value_db + 1})
+                return data
+            if pk_value_db:
+                data.update({name: pk_value_db + 1})
+                return data
+            if pk_value_local:
+                data.update({name: pk_value_local + 1})
+                return data
+            data.update({name: 1})
             return data
         raise NodePrimaryKeyError
 
@@ -1730,15 +1648,18 @@ class PrimaryKeyFactory(ModelTools):
             return {field_name: value}
 
     @classmethod
-    def _get_highest_autoincrement_pk_from_local(cls, model) -> int:
+    def _get_highest_autoincrement_pk_from_local(cls, model) -> Optional[int]:
         try:
             val = max(map(lambda x: x.get_primary_key_and_value(only_value=True),
                           cls.connection.items.search_nodes(model)))
         except ValueError:
-            return 1
-        else:
-            val += 1
+            return None
         return val
+
+    @classmethod
+    def _get_highest_autoincrement_pk_from_database(cls, model) -> int:
+        cls.is_valid_model_instance(model)
+        return cls.connection.database.query(func.max(getattr(model, ModelTools.get_primary_key_column_name(model)))).scalar()
 
     @classmethod
     def __clear_node_data(cls, model, data):
@@ -1798,7 +1719,7 @@ class Tool(ORMAttributes):
 
     @classmethod
     def set_item(cls, _model=None, _insert=False, _update=False,
-                 _delete=False, _ready=False, _where=None, **value):
+                 _delete=False, _ready=False, **value):
         model = _model or cls._model_obj
         if isinstance(_model, str):
             model = ModelTools.import_model(_model)
@@ -1809,7 +1730,7 @@ class Tool(ORMAttributes):
         items.LinkedListItem = QueueItem
         attrs = {"_model": model, "_ready": _ready,
                  "_insert": _insert, "_update": _update,
-                 "_delete": _delete, "_where": _where, "_container": items}
+                 "_delete": _delete}
         attrs.update(PrimaryKeyFactory.create_primary(model, **{**value, **attrs}))
         items.enqueue(**attrs)
         cls.__set_cache(items)
@@ -1846,8 +1767,7 @@ class Tool(ORMAttributes):
                 result = Queue()
                 for item in items_db:
                     col_names = model().column_names
-                    result.append(**{key: item.__dict__[key] for key in col_names}, _insert=True, _model=model,
-                                  _container=result)
+                    result.append(**{key: item.__dict__[key] for key in col_names}, _insert=True, _model=model)
                 return result
             return add_to_queue()
 
@@ -2006,7 +1926,7 @@ class Tool(ORMAttributes):
                         all_column_names = getattr(type(join_select_result), "column_names")
                         r = {col_name: col_val for col_name, col_val in join_select_result.__dict__.items()
                              if col_name in all_column_names}  # O(n) * O(j)
-                        row.append(_model=join_select_result.__class__, _insert=True, _container=row, **r)  # O(l)
+                        row.append(_model=join_select_result.__class__, _insert=True, **r)  # O(l)
                     yield row
             sql_text = create_request()
             query: Query = eval(sql_text, {"db": cls.connection.database}, ChainMap(*list(map(lambda x: {x.__name__: x}, models)), {"select": select}))
@@ -2028,14 +1948,7 @@ class Tool(ORMAttributes):
                             if table_column in node.value:  # O(y)
                                 yield {node.model.__name__: node}
 
-            def compare_by_matched_fk() -> Iterator:  # g(n) = O(n * k)
-                # f(n) = O(u) + O(2u) + O(n) * (O(j) * O(k) * (O(l) * O(1) * O(b) * (O(a) + O(a) + O(c * v) + O(c1 * v1) + O(m1 * m2) + O(1) + O(1))))
-                # f(n) = O(u) + O(2u) + O(n) * (O(j) * O(k) * (O(l) * O(1) * O(b) * O(m * v)))
-                # f(n) = O(u) + O(2u) + O(n) * (O(j) * O(k) * O(l * v))
-                # f(n) = O(u) + O(2u) + O(n) * O(j * k)
-                # f(n) = O(3u) + O(n) * O(j * k)
-                # f(n) = O(3u) + O(n * k)
-                # g(n) = O(n * k)
+            def compare_by_matched_fk() -> Iterator:
                 model_left_primary_key_and_value = collect_node_values(_on.keys())  # O(u)
                 model_right_primary_key_and_value = tuple(collect_node_values(_on.values()))  # O(2u)
                 for left_data in model_left_primary_key_and_value:  # O(n)
@@ -2050,8 +1963,8 @@ class Tool(ORMAttributes):
                             if left_model_name == left_table_name_in_on and right_model_name == right_table_name_in_on:  # O(c * v) + O(c1 * v1)
                                 if left_node.value.get(left_table_field_in_on, None) == \
                                         right_node.value.get(right_table_field_in_on, None):  # O(1) + O(m1) * O(1) + O(m2) = O(m1 * m2)
-                                    raw.append(**left_node.get_attributes(new_container=raw))
-                                    raw.append(**right_node.get_attributes(new_container=raw))
+                                    raw.append(**left_node.get_attributes())
+                                    raw.append(**right_node.get_attributes())
                         if raw:
                             yield raw
             return compare_by_matched_fk()
@@ -2160,17 +2073,13 @@ class Tool(ORMAttributes):
         путём итерации по ним, и попыткой сохранить в базу данных.
         :return: None
         """
-        updated_remaining_nodes = Queue()
-
         def actualize_node_data(remaining_nodes: Queue):
+            updated_remaining_nodes = Queue()
             """ Обновить данные нод, которые не удалось закоммитить, из базы данных """
-            [updated_remaining_nodes.append(
-                **PrimaryKeyFactory.create_primary(node.model,
-                                                   **node.get_attributes(with_update={
-                                                       "_container": updated_remaining_nodes
-                                                   }))
-                                            )
-             for node in remaining_nodes]
+            for node in remaining_nodes:
+                node_data = PrimaryKeyFactory.create_primary(node.model, **node.get_attributes())
+                node_data.update({"_model": node.model, node.type: True})
+                updated_remaining_nodes.append(**node_data)
             return updated_remaining_nodes
         database_adapter = SQLAlchemyQueryManager(DATABASE_PATH, cls.connection.items)
         database_adapter.start()
@@ -2453,7 +2362,7 @@ class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
         output = ServiceOrmContainer()
         local_items = self.get_local_nodes()
         database_items = self.get_nodes_from_database()
-        [output.enqueue(**node.get_attributes(new_container=output))
+        [output.enqueue(**node.get_attributes())
          for collection in (database_items, local_items,) for node in collection]
         return ResultORMCollection(output)
 
