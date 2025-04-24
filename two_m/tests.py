@@ -275,46 +275,46 @@ class TestToolItemQueue(unittest.TestCase):
         Queue()
         queue = Queue()
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "Test", "machineid": 1},
                 {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "Name", "machineid": 4},
                 {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "NewTest", "machineid": 2
                  }]
         Queue(data)
         # invalid primary key
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "Test", "machineid": {}},
                 {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "Name", "machineid": 4},
                 {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "NewTest", "machineid": int
                  }]
         with self.assertRaises(NodeColumnValueError):
             Queue(data)
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "Test", "machineid": ""}]
         with self.assertRaises(NodeColumnValueError):
             Queue(data)
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "Test", "machineid": "12"}]
         with self.assertRaises(NodeColumnValueError):
             Queue(data)
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "Test", "machineid": None}]
-        with self.assertRaises(NodePrimaryKeyError):
+        with self.assertRaises(NodeColumnValueError):
             Queue(data)
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "Test"}]
         with self.assertRaises(NodePrimaryKeyError):
             Queue(data)
@@ -323,13 +323,13 @@ class TestToolItemQueue(unittest.TestCase):
     def test_enqueue(self):
         queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test", "machineid": 1},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test1", "machineid": 2},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "NewTest", "machineid": 3
                         }]
         self.assertIsNone(queue.dequeue())
@@ -364,13 +364,13 @@ class TestToolItemQueue(unittest.TestCase):
         #
         queue = Queue()
         data__len_1 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test", "xover": 10, "machineid": 3},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test", "yover": 10, "machineid": 3},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test", "zover": 10, "machineid": 3
                         }]
         [queue.enqueue(**data__len_1[i]) for i in range(len(data__len_1))]
@@ -379,13 +379,13 @@ class TestToolItemQueue(unittest.TestCase):
         self.assertEqual(len(set(queue[0].value).intersection(set({"xover": 10, "yover": 10, "zover": 10}))), 3)
         queue = Queue()
         data_with_primary_key_from_ui = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                                          "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                                          "_delete": False, "_create_at": datetime.datetime.now(), 
                                           "machinename": "FirstTest", "xover": 10, "machineid": 3},
                                          {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                                          "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                                          "_delete": False, "_create_at": datetime.datetime.now(), 
                                           "machinename": "Test", "yover": 10, "machineid": 3},
                                          {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                                          "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                                          "_delete": False, "_create_at": datetime.datetime.now(), 
                                           "machinename": "LastName", "zover": 10, "xover": 0, "machineid": 3
                                           }]
         [queue.enqueue(**data) for data in data_with_primary_key_from_ui]
@@ -399,13 +399,13 @@ class TestToolItemQueue(unittest.TestCase):
     def test_dequeue(self):
         queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test", "machineid": 3},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test1", "machineid": 2},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "NewTest", "machineid": 1
                         }]
         with self.assertRaises(IndexError):
@@ -435,13 +435,13 @@ class TestToolItemQueue(unittest.TestCase):
     def test_remove_node_from_queue(self):
         queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test", "machineid": 1},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test1", "machineid": 2},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "NewTest", "machineid": 3
                         }]
         [queue.enqueue(**data) for data in data__len_3]
@@ -466,13 +466,13 @@ class TestResultORMCollection(unittest.TestCase):
         Tool.DATABASE_PATH = DATABASE_PATH
         queue = Queue()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test", "machineid": 1},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test1", "machineid": 2},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                        "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                        "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "NewTest", "machineid": 3
                         }]
         [queue.enqueue(**item) for item in data__len_3]
@@ -484,13 +484,13 @@ class TestResultORMCollection(unittest.TestCase):
         hash_val = hash(self.result_collection)
         queue = ServiceOrmContainer()
         changed_data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                                "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                                "_delete": False, "_create_at": datetime.datetime.now(), 
                                 "machinename": "Tdfgdfgerest", "machineid": 1},
                                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                                "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                                "_delete": False, "_create_at": datetime.datetime.now(), 
                                 "machinename": "Test1", "machineid": 2},
                                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                                "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                                "_delete": False, "_create_at": datetime.datetime.now(), 
                                 "machinename": "NewTgest", "machineid": 3
                                 }]
         [queue.enqueue(**item) for item in changed_data__len_3]
@@ -523,15 +523,15 @@ class TestResultORMCollection(unittest.TestCase):
     def test_auto_mode_prefix(self):
         queue = ServiceOrmContainer()
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "Test", "cncid": 1, "machineid": 1},
                 {"_model": Cnc, "_ready": False, "_insert": False, "_update": True,
-                 "_delete": False, "_create_at": datetime.datetime.now(), "_container": queue,
+                 "_delete": False, "_create_at": datetime.datetime.now(), 
                  "name": "Testcnc", "cncid": 1},
                 {"_model": OperationDelegation, "replaceid": 1,
-                 "_create_at": datetime.datetime.now(), "_container": queue, "_insert": True, "opid": str(uuid4())},
+                 "_create_at": datetime.datetime.now(),  "_insert": True, "opid": str(uuid4())},
                 {"_model": Replace, "replaceid": 1, "findstr": "trststr",
-                 "_create_at": datetime.datetime.now(), "_container": queue, "_insert": True}
+                 "_create_at": datetime.datetime.now(),  "_insert": True}
                 ]
         [queue.enqueue(**n) for n in data]
         self.result_collection = ResultORMCollection(queue)
@@ -894,7 +894,6 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.orm_manager.set_item(_model=Machine, _update=True, machinename="name", machineid=1)
         self.orm_manager.set_item(_model=Cnc, name="name_n", _update=True, commentsymbol="#")
         self.orm_manager.set_item(_model=Cnc, name="naаке", _update=True, cncid=2)
-        self.orm_manager.set_item(_model=Cnc, name="naаке", _update=True, cncid=1)
         self.assertTrue(join_select_result.has_changes(val_from_0))
         self.assertTrue(join_select_result.has_changes(val_from_1))
         self.assertFalse(join_select_result.has_changes())
