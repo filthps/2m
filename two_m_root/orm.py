@@ -550,7 +550,7 @@ class Queue(LinkedList):
     def enqueue(self, **attrs):
         """ Установка ноды в конец очереди с хитрой логикой проверки на совпадение. """
         exists_item, new_item = self._replication(**attrs)
-        self._remove_from_queue(exists_item) if exists_item else None
+        self._remove_from_queue(exists_item) if exists_item is not None else None
         self._remove_other_node_with_current_foreign_key_value(new_item)
         self._check_primary_key_unique(new_item)
         self._check_unique_values(new_item)
@@ -1373,23 +1373,19 @@ class SQLAlchemyQueryManager:
                 try:
                     session.add_all(items_to_commit)
                 except SQLAlchemyError as error:
-                    print(error)
                     self.remaining_nodes += node_group
                     point.rollback()
             else:
                 try:
                     session.execute(items_to_commit.pop())
                 except SQLAlchemyError as error:
-                    print(error)
                     self.remaining_nodes += node_group
             try:
                 session.commit()
             except SQLAlchemyError as error:
-                print(error)
                 self.remaining_nodes += node_group
             except DatabaseException as error:
                 self.remaining_nodes += node_group  # todo: O(n**2)!
-                print(error)
         self._sorted = []
         self._query_objects = {}
 
@@ -1401,7 +1397,7 @@ class SQLAlchemyQueryManager:
             O(m) * (O(n) + O(j)) = O(n) * O(m) = O(n)
             """
             related_nodes = self._node_items.get_related_nodes(n)  # O(n)
-            linked_nodes.add_to_head(**n.get_attributes())
+            linked_nodes.add_to_head(**n.get_attributes()) if n.ready else None
             if not related_nodes:
                 return linked_nodes
             for node in related_nodes:
@@ -2074,12 +2070,12 @@ class Tool(ORMAttributes):
         :return: None
         """
         def actualize_node_data(remaining_nodes: Queue):
-            updated_remaining_nodes = Queue()
             """ Обновить данные нод, которые не удалось закоммитить, из базы данных """
+            updated_remaining_nodes = Queue()
+            updated_remaining_nodes.LinkedListItem = QueueItem
             for node in remaining_nodes:
                 node_data = PrimaryKeyFactory.create_primary(node.model, **node.get_attributes())
-                node_data.update({"_model": node.model, node.type: True})
-                updated_remaining_nodes.append(**node_data)
+                updated_remaining_nodes.enqueue(**node_data)
             return updated_remaining_nodes
         database_adapter = SQLAlchemyQueryManager(DATABASE_PATH, cls.connection.items)
         database_adapter.start()
