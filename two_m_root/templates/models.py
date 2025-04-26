@@ -4,6 +4,7 @@ Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 """
 import os
 from dotenv import load_dotenv
+from sqlalchemy import Column, ForeignKey, String, Integer, Boolean, CheckConstraint, SmallInteger, Text
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy as FlaskSQLAlchemy
 from two_m_root.conf import GlobalFields
