@@ -5,7 +5,8 @@ import datetime
 from abc import abstractmethod
 from sqlalchemy import Column, DateTime
 
-RESERVED_WORDS = ("_insert", "_update", "_delete", "_ready", "_model", "column_names", "foreign_keys")
+RESERVED_WORDS = ("_insert", "_update", "_delete", "_ready", "_model", "_create_at", "_count_retries", "column_names",
+                  "foreign_keys")
 
 
 class AbstractModelController:

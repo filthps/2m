@@ -1664,6 +1664,9 @@ class PrimaryKeyFactory(ModelTools):
         result = {}
         for name in model().column_names:
             result.update({name: data[name]})
+        for key, value in data.items():
+            if key in RESERVED_WORDS:
+                result.update({key: value})
         return result
 
     @staticmethod
