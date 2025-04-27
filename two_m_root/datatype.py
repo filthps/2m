@@ -2,6 +2,7 @@ import weakref
 import copy
 from weakref import ref
 from typing import Optional, Iterable, Union, Any, Iterator
+from itertools import islice
 
 
 class LinkedListItem:
@@ -76,11 +77,23 @@ class LinkedListItem:
 class LinkedList:
     LinkedListItem = LinkedListItem
 
-    def __init__(self, items: Optional[Iterable[Any]] = None):
+    def __init__(self, items: Optional[Iterable[Any]] = None,
+                 nodes: Optional[Union[Iterable[LinkedListItem], Iterator[LinkedListItem]]] = None):
+        if items is not None and nodes is not None:
+            raise ValueError
         self._head: Optional[LinkedListItem] = None
         self._tail: Optional[LinkedListItem] = None
         if items is not None:
             [self.append(**item) for item in items]
+        if nodes is not None:
+            nodes = list(nodes)
+            self._head = self._tail = nodes.pop(0)
+            for node in nodes:
+                if type(node) is not self.LinkedListItem:
+                    raise TypeError
+                tail = self._tail
+                self.__set_next(tail, node)
+                self.__set_prev(node, tail)
 
     @property
     def head(self):
@@ -147,6 +160,8 @@ class LinkedList:
         return new_node
 
     def __getitem__(self, index):
+        if type(index) is slice:
+            return self.__slice(index)
         index = self.__support_negative_index(index)
         self._is_valid_index(index)
         result = self.__forward_move(index)
@@ -203,6 +218,9 @@ class LinkedList:
 
     def __iter__(self):
         return self.__gen(self._head)
+
+    def __reversed__(self):
+        return self.__class__(list(self.__backward_move_gen()))
 
     def __repr__(self):
         return f"{self.__class__}({tuple(self)})"
@@ -288,3 +306,24 @@ class LinkedList:
         while current_item is not None:
             yield current_item
             current_item = current_item.next
+
+    def __backward_move_gen(self):
+        element = self.tail
+        while element is not None:
+            yield element
+            element = element.prev
+
+    def __slice(self, slice_item: slice):
+        if slice_item.start < 0:
+            slice_item.start = len(self) - slice_item.start
+        if slice_item.stop < 0:
+            slice_item.stop = len(self) - slice_item.stop
+        if slice_item.start >= self.__len__():
+            raise IndexError
+        if len(self) >= slice_item.stop:
+            raise IndexError
+        if slice_item.step == 0 or slice_item.step >= self.__len__():
+            raise IndexError
+        if slice_item.step < 0:
+            return self.__class__(islice(reversed(self), slice_item.start, slice_item.stop, slice_item.step))
+        return self.__class__(islice(tuple(self), slice_item.start, slice_item.stop, slice_item.step))

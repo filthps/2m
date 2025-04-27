@@ -462,7 +462,7 @@ class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
             new_values.update({".".join(parts): value})
         self._val = new_values
 
-    def get_attributes(self, *args, **kwargs):
+    def get_attributes(self):
         return {"_model": self._model, "_primary_key": self._primary_key, **self._val}
 
     def __bool__(self):
@@ -1746,31 +1746,50 @@ class Tool(ORMAttributes):
         model = _model or cls._model_obj
         cls.is_valid_model_instance(model)
 
-        def select_from_db():
-            if not attrs:
-                try:
-                    items_db = cls.connection.database.query(model).all()
-                except OperationalError:
-                    print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
-                          "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
-                    raise OperationalError
+        def select_from_db(items_count=None):
+            if items_count is None:
+                if not attrs:
+                    try:
+                        items_db = cls.connection.database.query(model).all()
+                    except OperationalError:
+                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
+                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
+                        raise OperationalError
+                else:
+                    try:
+                        items_db = cls.connection.database.query(model).filter_by(**attrs).all()
+                    except OperationalError:
+                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
+                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
+                        raise OperationalError
             else:
-                try:
-                    items_db = cls.connection.database.query(model).filter_by(**attrs).all()
-                except OperationalError:
-                    print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
-                          "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
-                    raise OperationalError
+                if not attrs:
+                    try:
+                        items_db = cls.connection.database.query(model).limit(items_count).all()
+                    except OperationalError:
+                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
+                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
+                        raise OperationalError
+                else:
+                    try:
+                        items_db = cls.connection.database.query(model).filter_by(**attrs).limit(items_count).all()
+                    except OperationalError:
+                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
+                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
+                        raise OperationalError
 
             def add_to_queue():
                 result = Queue()
+                result.LinkedListItem = ServiceOrmItem
                 for item in items_db:
                     col_names = model().column_names
                     result.append(**{key: item.__dict__[key] for key in col_names}, _insert=True, _model=model)
                 return result
             return add_to_queue()
 
-        def select_from_cache():
+        def select_from_cache(items_count=None):
+            if items_count is not None:
+                return cls.connection.items.search_nodes(model, **attrs)[:items_count]
             return cls.connection.items.search_nodes(model, **attrs)
         return Result(get_nodes_from_database=select_from_db, get_local_nodes=select_from_cache,
                       only_local=_queue_only, only_database=_db_only, model=model, where=attrs)
@@ -1894,16 +1913,16 @@ class Tool(ORMAttributes):
             check_transitivity_on_params()
         valid_params()
 
-        def collect_db_data():
+        def collect_db_data(items_count=None):
             def create_request() -> str:  # O(n) * O(m)
-                s = f"db.query({', '.join(map(lambda x: x.__name__, models))}).filter("  # O(l) * O(1)
+                s = f"db.query({', '.join(map(lambda x: x.__name__, models))}).filter("
                 on_keys_counter = 0
                 for left_table_dot_field, right_table_dot_field in _on.items():  # O(n)
                     s += f"{left_table_dot_field} == {right_table_dot_field}"
                     on_keys_counter += 1
                     if not on_keys_counter == len(_on):
                         s += ", "
-                s += ")"
+                s += ")" if items_count is None else f").limit({items_count})"
                 if where:
                     on_keys_counter = 0
                     s += f".filter("
@@ -1938,7 +1957,7 @@ class Tool(ORMAttributes):
                 heap += temp.search_nodes(model, **where.get(model.__name__, {}))  # O(n * k)
             return heap
 
-        def collect_local_data() -> Iterator[ServiceOrmContainer]:
+        def collect_local_data(items_count=None) -> Iterator[ServiceOrmContainer]:
             def collect_node_values(on_keys_or_values: Union[dict.keys, dict.values]):  # f(n) = O(n) * (O(k) * O(u) * (O(l) * O(m)) * O(y)); g(n) = O(n * k)
                 for node in collect_all_local_nodes():  # O(n)
                     for table_and_column in on_keys_or_values:  # O(k)
@@ -2294,7 +2313,9 @@ class BaseResult(ABC, ResultCacheTools):
         else:
             return True
 
-    def __getitem__(self, item: Union[str, int]):
+    def __getitem__(self, item: Union[str, int, slice]):
+        if type(item) is slice:
+            return self.__slice(item)
         return self.items[item]
 
     def __str__(self):
@@ -2340,6 +2361,15 @@ class BaseResult(ABC, ResultCacheTools):
             if str(node_or_group.hash_by_pk) == pk_hash:
                 return hash(node_or_group)
 
+    def __slice(self, object_: slice):
+        """ slice применяется в качестве ограничителя количества выборки.
+         Если указан start, то он является условием. Результат окажется пустым,
+         если количество записей в результате окажется меньше, чем число, указанное на позиции start в срезе. """
+        if not object_.step == 1:
+            raise ValueError("Выборка с шагом не поддерживается, шаг всегда 1")
+        if object_.start:
+            pass
+
 
 class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
     """ Экземпляр данного класса возвращается функцией Tool.get_items() """
@@ -2357,7 +2387,7 @@ class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
         self._model = model
         super().__init__(*args, model=model, where=where, **kwargs)
 
-    def _merge(self):
+    def _merge(self, max_count=None):
         output = ServiceOrmContainer()
         local_items = self.get_local_nodes()
         database_items = self.get_nodes_from_database()
