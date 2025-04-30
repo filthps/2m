@@ -147,10 +147,7 @@ class ModelTools(ORMAttributes):
 
 
 class NodeTools:
-    """
-    Средства валидации для всех объектов, производных от QueueItem
-    """
-
+    """ Средства валидации для всех объектов, производных от QueueItem """
     @staticmethod
     def _is_valid_primary_key(d: dict, model: CustomModel):
         if not isinstance(d, dict):
@@ -215,8 +212,19 @@ class NodeTools:
         return True
 
 
-class QueueItem(LinkedListItem, ModelTools, NodeTools):
-    """ Иммутабельный класс ноды для Queue. Нода для инъекции в базу. """
+class AbsNode(ABC):
+    @property
+    @abstractmethod
+    def model(self):
+        pass
+
+    @abstractmethod
+    def get_primary_key_and_value(self, only_key=False, only_val=False):
+        pass
+
+
+class QueueItem(LinkedListItem, ModelTools, NodeTools, AbsNode):
+    """ Нода для постановки в очередь с последующей инъекцией в базу данных. """
     def __init__(self, _insert=False, _update=False, _delete=False,
                  _model=None, _create_at=None, _count_retries=0, _ready=False,  **node_data):
         super().__init__(**node_data)
@@ -273,7 +281,6 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
         self.__is_ready = self._check_not_null_fields_in_node_value(self)
         return self.__is_ready
 
-
     @property
     def type(self) -> str:
         return "_insert" if self.__insert else "_update" if self.__update else "_delete"
@@ -286,7 +293,7 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
         result.update({"_model": self.__model, "_insert": False,
                        "_update": False, "_ready": self.__is_ready,
                        "_delete": False, "_count_retries": self.retries})
-        result.update({self.type: True})
+        result.update({self.type: True}) if self.type is not None else None
         result.update(with_update) if with_update else None
         return result
 
@@ -304,11 +311,6 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
 
     def __len__(self):
         return len(self._val)
-
-    def __eq__(self, other: "QueueItem"):
-        if type(other) is not type(self):
-            return False
-        return self.__hash__() == hash(other)
 
     def __contains__(self, item: str):
         if not isinstance(item, str):
@@ -340,13 +342,6 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
         attributes.update({"_create_at": create_at.strftime("%d:%m:%S")})
         return ', '.join(map(lambda i: '='.join([str(e) for e in i]), attributes.items()))
 
-    def __hash__(self):
-        value = self.value
-        if ModelTools.is_autoincrement_primary_key(self.__model):
-            del value[self.get_primary_key_and_value(only_key=True)]
-        str_ = "".join(map(lambda x: str(x), itertools.chain(*value.items())))
-        return int.from_bytes(hashlib.md5(str_.encode("utf-8")).digest(), "big")
-
     def __getitem__(self, item: str):
         if type(item) is not str:
             raise TypeError
@@ -355,32 +350,7 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
         return self.value[item]
 
 
-class EmptyOrmItem(LinkedListItem):
-    """
-    Пустой класс для возврата пустой "ноды". Заглушка
-    """
-    def __eq__(self, other):
-        if type(other) is type(self):
-            return True
-        return False
-
-    def __len__(self):
-        return 0
-
-    def __bool__(self):
-        return False
-
-    def __repr__(self):
-        return f"{type(self).__name__}()"
-
-    def __str__(self):
-        return "None"
-
-    def __hash__(self):
-        return 0
-
-
-class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
+class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools, AbsNode):
     def __init__(self, _model, _primary_key: Optional[dict], _ui_hidden=False, **k):
         self._primary_key = _primary_key
         self._model = _model
@@ -463,7 +433,7 @@ class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
         self._val = new_values
 
     def get_attributes(self):
-        return {"_model": self._model, "_primary_key": self._primary_key, **self._val}
+        return {"_model": self._model, "_primary_key": self._primary_key, "_ui_hidden": self._hidden, **self._val}
 
     def __bool__(self):
         if not self.value:
@@ -570,11 +540,6 @@ class Queue(LinkedList):
             self._remove_from_queue(left_node)
             return left_node
 
-    def order_by(self, model: Type[CustomModel],
-                 by_column_name: Optional[str] = None, by_primary_key: bool = False,
-                 by_create_time: bool = False, decr: bool = False):
-        super().order_by(model, by_column_name, by_primary_key, by_create_time, decr)
-
     def get_related_nodes(self, main_node: QueueItem, other_container=None) -> "Queue":
         """ Получить все связанные (внешним ключом) с передаваемой нодой ноды.
         O(i) * O(1) + O(n) = O(n)"""
@@ -661,31 +626,23 @@ class Queue(LinkedList):
     def __str__(self):
         return "\n".join(tuple(str(m) for m in self))
 
-    def __contains__(self, item: QueueItem) -> bool:
-        if type(item) is not QueueItem:
-            return False
-        for node in self:
-            if hash(node) == item.__hash__():
-                return True
-        return False
-
-    def __add__(self, other: "Queue"):
-        if not type(other) is self.__class__:
+    def __add__(self, other):
+        if type(other) is not self.__class__:
             raise TypeError
         result_instance = self.__class__()
-        [result_instance.append(**n.get_attributes()) for n in self]  # O(n)
-        [result_instance.enqueue(**n.get_attributes()) for n in other]  # O(n**2) todo n**2!
+        [result_instance.append(**n.get_attributes()) for n in self]
+        [result_instance.enqueue(**n.get_attributes()) for n in other]
         return result_instance
 
     def __iadd__(self, other):
         if not isinstance(other, type(self)):
             raise TypeError
-        result: Queue = self + other
+        result = self + other
         self._head = result.head
         self._tail = result.tail
         return result
 
-    def __sub__(self, other: "Queue"):
+    def __sub__(self, other):
         if not isinstance(other, self.__class__):
             raise TypeError
         result_instance = copy.deepcopy(self)
@@ -702,16 +659,6 @@ class Queue(LinkedList):
                 output.enqueue(**left_node.get_attributes())
                 output.enqueue(**right_node.get_attributes())
         return output
-
-    def __eq__(self, other):
-        if not isinstance(other, self.__class__):
-            return False
-        if not len(self) == len(other):
-            return False
-        return hash(self) == hash(other)
-
-    def __hash__(self):
-        return sum(map(hash, self))
 
     def _replication(self, **new_node_complete_data: dict) -> tuple[Optional[QueueItem], QueueItem]:  # O(l * k) + O(n) + O(1) = O(n)
         """
@@ -1416,22 +1363,49 @@ class SQLAlchemyQueryManager:
         return self._sorted
 
 
-class ServiceOrmItem(QueueItem):
+class ServiceOrmItem(QueueItem, AbsNode):
+    """ Данный тип нод используется для вывода результата """
     @property
     def hash_by_pk(self):
         str_ = "".join(map(str, self.get_primary_key_and_value(as_tuple=True)))
         return int.from_bytes(hashlib.md5(str_.encode("utf-8")).digest(), "big")
 
+    def __hash__(self):
+        value = self.value
+        if ModelTools.is_autoincrement_primary_key(self.model):
+            del value[self.get_primary_key_and_value(only_key=True)]
+        str_ = "".join(map(lambda x: str(x), itertools.chain(*value.items())))
+        return int.from_bytes(hashlib.md5(str_.encode("utf-8")).digest(), "big")
+
+    def __eq__(self, other: "QueueItem"):
+        if type(other) is not type(self):
+            return False
+        return self.__hash__() == hash(other)
+
     @staticmethod
-    def _field_names_validation(node, values_d: dict):
-        def clear_names():
-            """ Префиксы вида 'ModelClassName.column_name'. Очистить имена столбцов от них """
-            value = {(k[k.index(".") + 1:] if "." in k else k): v for k, v in values_d.items()}
-            return value
-        return super()._field_names_validation(node, clear_names())
+    def _field_names_validation(*a, **k):
+        """ Так как данный тип нод используется в формировании результатов, отключить валидацию """
+        pass
+
+    @staticmethod
+    def _is_valid_column_type_in_sql_type(*a):
+        """ Так как данный тип нод используется в формировании результатов, отключить валидацию """
+        pass
+
+    @staticmethod
+    def _is_valid_primary_key(d: dict, model: CustomModel):
+        pass
+
+    @property
+    def retries(self):
+        return None
+
+    def make_query(self):
+        pass
 
 
 class ServiceOrmContainer(Queue):
+    """ Контейнер с композицией результата """
     LinkedListItem: Union[ServiceOrmItem, ResultORMItem] = ServiceOrmItem
 
     @property
@@ -1455,6 +1429,8 @@ class ServiceOrmContainer(Queue):
         raise DoesNotExists
 
     def __contains__(self, item: Union[ServiceOrmItem, ResultORMItem]):
+        if not isinstance(item, (ServiceOrmItem, ResultORMItem,)):
+            return False
         i = self.__iter__()
         while True:
             try:
@@ -1465,6 +1441,16 @@ class ServiceOrmContainer(Queue):
                 if node == item:
                     return True
         return False
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        if not len(self) == len(other):
+            return False
+        return hash(self) == hash(other)
+
+    def __hash__(self):
+        return sum(map(hash, self))
 
 
 class ConnectionManager:
@@ -2219,7 +2205,32 @@ class ResultCacheTools(Tool):
             raise TypeError
 
 
-class BaseResult(ABC, ResultCacheTools):
+class SliceResult:
+    """ Функционал для контроля численности выборки в виде реализации среза. Мемоизация параметров среза. """
+    def __init__(self):
+        pass
+
+    def __getitem__(self, item: slice):
+        if type(item) is not slice:
+            raise TypeError
+        self.__is_valid_slice(item)
+
+
+    @staticmethod
+    def __is_valid_slice(self):
+        pass
+
+    def __slice(self, object_: slice):
+        """ slice применяется в качестве ограничителя количества выборки.
+         Если указан start, то он является условием. Результат окажется пустым,
+         если количество записей в результате окажется меньше, чем число, указанное на позиции start в срезе. """
+        if not object_.step == 1:
+            raise ValueError("Выборка с шагом не поддерживается, шаг всегда 1")
+        if object_.start:
+            pass
+
+
+class BaseResult(ABC, ResultCacheTools, SliceResult):
     TEMP_HASH_PREFIX: str = ...
     _merge = abstractmethod(lambda: ResultORMCollection())  # Функция, которая делает репликацию нод из кеша поверх нод из бд
     _get_node_by_joined_primary_key_and_value = abstractmethod(lambda model_pk_val_str,
@@ -2234,6 +2245,7 @@ class BaseResult(ABC, ResultCacheTools):
         self._only_db = only_database
         self._pointer: Optional["Pointer"] = None
         self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
+        self._is_slice = False
         self._is_sort = False
         self.__is_valid()
         super().__init__(self._id)
@@ -2315,7 +2327,7 @@ class BaseResult(ABC, ResultCacheTools):
 
     def __getitem__(self, item: Union[str, int, slice]):
         if type(item) is slice:
-            return self.__slice(item)
+            return super().__getitem__(item)
         return self.items[item]
 
     def __str__(self):
@@ -2360,15 +2372,6 @@ class BaseResult(ABC, ResultCacheTools):
         for node_or_group in collection:
             if str(node_or_group.hash_by_pk) == pk_hash:
                 return hash(node_or_group)
-
-    def __slice(self, object_: slice):
-        """ slice применяется в качестве ограничителя количества выборки.
-         Если указан start, то он является условием. Результат окажется пустым,
-         если количество записей в результате окажется меньше, чем число, указанное на позиции start в срезе. """
-        if not object_.step == 1:
-            raise ValueError("Выборка с шагом не поддерживается, шаг всегда 1")
-        if object_.start:
-            pass
 
 
 class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
