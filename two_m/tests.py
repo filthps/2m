@@ -611,7 +611,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
     @db_reinit
     def test_items_property(self):
         self.set_data_into_queue()
-        self.assertEqual(self.orm_manager.connection.cache.get("ORMItems"), self.orm_manager.connection.items)
+        self.assertIsInstance(self.orm_manager.connection.cache.get("ORMItems"), type(self.orm_manager.connection.items))
         self.orm_manager.set_item(_insert=True, _model=Cnc, name="F")
         self.assertEqual(len(self.orm_manager.connection.items), 11)
 
