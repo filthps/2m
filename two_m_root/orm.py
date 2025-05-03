@@ -2130,7 +2130,7 @@ class ResultCacheTools(Tool):
     TEMP_HASH_PREFIX: str = ...
     __iter__ = abstractmethod(lambda self: ...)
 
-    def __init__(self, id_: int, *args, **kw):
+    def __init__(self: Union["JoinSelectResult", "Result"], id_: int, *args, **kw):
         if not issubclass(type(self), BaseResult):
             raise TypeError
         if type(id_) is not int:
@@ -2205,32 +2205,91 @@ class ResultCacheTools(Tool):
             raise TypeError
 
 
-class SliceResult:
+class SliceResultMixin:
     """ Функционал для контроля численности выборки в виде реализации среза. Мемоизация параметров среза. """
-    def __init__(self):
-        pass
+    DEFAULT_START = float("inf")
+    DEFAULT_END = 50
+    _get_nodes_from_database: Optional[callable] = None
+    _get_local_nodes: Optional[callable] = None
 
-    def __getitem__(self, item: slice):
-        if type(item) is not slice:
+    def __init__(self: Union["JoinSelectResult", "Result"]):
+        if not issubclass(type(self), BaseResult):
             raise TypeError
+        self._is_slice = False
+        self.__start: Optional[int] = None
+        self.__end: Optional[int] = None
+
+    def reset_slice(self):
+        self._is_slice = False
+        
+    def __getitem__(self, item: slice):
         self.__is_valid_slice(item)
+        if item.stop == float("inf") and item.start == float("inf"):
+            self.reset_slice()
+            return
+        self._is_slice = True
+        return self.__slice_data()
 
+    def __is_valid_slice(self, object_: slice):
+        if not isinstance(object_, slice):
+            raise TypeError
+        object_ = self.__support_negative_value(object_)
+        if type(object_.start) is not int or type(object_.step) is not int or type(object_.stop) is not int:
+            raise TypeError
+        if not object_.step == 1:
+            raise ValueError("Шаг среза не поддерживается")
+        if object_.start < 1:
+            raise ValueError
+        if object_.stop < 1:
+            raise ValueError
 
-    @staticmethod
-    def __is_valid_slice(self):
+    def _merge(self):
         pass
 
-    def __slice(self, object_: slice):
+    def __slice(self):
         """ slice применяется в качестве ограничителя количества выборки.
          Если указан start, то он является условием. Результат окажется пустым,
          если количество записей в результате окажется меньше, чем число, указанное на позиции start в срезе. """
-        if not object_.step == 1:
-            raise ValueError("Выборка с шагом не поддерживается, шаг всегда 1")
-        if object_.start:
-            pass
+        if self.__start is None and self.__end is None:
+            return 
+        ...
+
+    @staticmethod
+    def __support_negative_value(slice_: slice) -> slice:
+        """ Отрицательные значения в текущей версии не поддерживаются """
+        ...  # todo: Придумать как реализовать отрицательные значения
+        return slice_
 
 
-class BaseResult(ABC, ResultCacheTools, SliceResult):
+class DataLoader:
+    AVAILABLE_ATTRIBUTE_NAMES = ("_only_db", "_only_queue", )
+    AVAILABLE_ATTRIBUTE_VALUES_TYPES = {"_only_queue": bool, "_only_db": bool}
+
+    def __init__(self, database_node_getter: Optional[callable] = None, cache_node_getter: Optional[callable] = None,
+                 _only_db=False, _only_queue=False, **k):
+        self.__db_items_loader = database_node_getter
+        self.__local_items_loader = cache_node_getter
+        self.__kwargs_queue = k
+        self.__validate_params(self.__kwargs_queue)
+
+    def push_to_kwargs(self, **kwargs):
+        self.__validate_params(kwargs)
+        self.__kwargs_queue.update(kwargs)
+
+    def pop_from_kwargs(self, **kw):
+        for key, value in kw.items():
+            if key not in self.__kwargs_queue:
+                raise KeyError
+            if not value == self.__kwargs_queue[key]:
+                continue
+            self.__kwargs_queue.pop(key)
+
+    @staticmethod
+    def __validate_params(params: dict):
+        pass
+
+
+class BaseResult(ABC, ResultCacheTools):
     TEMP_HASH_PREFIX: str = ...
     _merge = abstractmethod(lambda: ResultORMCollection())  # Функция, которая делает репликацию нод из кеша поверх нод из бд
     _get_node_by_joined_primary_key_and_value = abstractmethod(lambda model_pk_val_str,
@@ -2238,15 +2297,15 @@ class BaseResult(ABC, ResultCacheTools, SliceResult):
     # входящей строке вида: 'имя_таблицы:primary_key:значение'
 
     def __init__(self, get_nodes_from_database=None, get_local_nodes=None, only_local=False, only_database=False, **kwargs):
-        self.get_nodes_from_database: Optional[callable] = get_nodes_from_database  # Функция, в которой происходит получение контейнера с нодами из бд
-        self.get_local_nodes: Optional[callable] = get_local_nodes  # Функция, в которой происходит получение контейнера с нодами из кеша
+        self._get_nodes_from_database: Optional[callable] = get_nodes_from_database  # Функция, в которой происходит получение контейнера с нодами из бд
+        self._get_local_nodes: Optional[callable] = get_local_nodes  # Функция, в которой происходит получение контейнера с нодами из кеша
         self._id = self.__gen_id(**{**kwargs, "only_local": only_local, "only_database": only_database})
         self._only_queue = only_local
         self._only_db = only_database
         self._pointer: Optional["Pointer"] = None
-        self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
         self._is_slice = False
         self._is_sort = False
+        self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
         self.__is_valid()
         super().__init__(self._id)
         self._set_hash(self.items)
@@ -2326,8 +2385,6 @@ class BaseResult(ABC, ResultCacheTools, SliceResult):
             return True
 
     def __getitem__(self, item: Union[str, int, slice]):
-        if type(item) is slice:
-            return super().__getitem__(item)
         return self.items[item]
 
     def __str__(self):
@@ -2361,10 +2418,10 @@ class BaseResult(ABC, ResultCacheTools, SliceResult):
         if not sum((self._only_queue, self._only_db,)) in (0, 1,):
             raise ValueError
         if not self._only_queue:
-            if not callable(self.get_local_nodes):
+            if not callable(self._get_local_nodes):
                 raise ValueError
         if not self._only_db:
-            if not callable(self.get_nodes_from_database):
+            if not callable(self._get_nodes_from_database):
                 raise ValueError
 
     @staticmethod
@@ -2374,7 +2431,7 @@ class BaseResult(ABC, ResultCacheTools, SliceResult):
                 return hash(node_or_group)
 
 
-class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
+class Result(SliceResultMixin, OrderBySingleResultMixin, BaseResult, ModelTools):
     """ Экземпляр данного класса возвращается функцией Tool.get_items() """
     TEMP_HASH_PREFIX = "simple_item_hash"
 
@@ -2390,10 +2447,12 @@ class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
         self._model = model
         super().__init__(*args, model=model, where=where, **kwargs)
 
-    def _merge(self, max_count=None):
+    def _merge(self, max_count=None, ordering_column="", ordering_direction: Literal["+", "-"] = "+"):
+        if self.is_slice:
+            return super()._merge()
         output = ServiceOrmContainer()
-        local_items = self.get_local_nodes()
-        database_items = self.get_nodes_from_database()
+        local_items = self._get_local_nodes()
+        database_items = self._get_nodes_from_database()
         [output.enqueue(**node.get_attributes())
          for collection in (database_items, local_items,) for node in collection]
         return ResultORMCollection(output)
@@ -2403,7 +2462,7 @@ class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
         return self.items.get_node(model, **{pk: val})
 
 
-class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
+class JoinSelectResult(SliceResultMixin, OrderByJoinResultMixin, BaseResult, ModelTools):
     """
     Экземпляр этого класса возвращается функцией Tool.join_select()
     1 экземпляр этого класса 1 результат вызова Tool.join_select()
@@ -2456,14 +2515,15 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
 
     @property
     def items(self) -> tuple[ResultORMCollection]:
-        """ Выполнить запрос в базу данных и/или в кеш. """
         if self._is_sort:
             result = tuple(super().items)
         else:
             result = tuple(self._merge())
         return result
 
-    def __getitem__(self, item: int) -> ResultORMCollection:
+    def __getitem__(self, item: Union[int, slice]) -> ResultORMCollection:
+        if type(item) is slice:
+            return super().__getitem__(item)
         data = self.items
         if type(item) is not int:
             raise TypeError
@@ -2518,7 +2578,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
             """ Оборвать связи между нодами из БД, если эта связь оборвана в локальных нодах """
             currently_added_hash = []
             nodes_with_foreign_keys_at_local_items = get_local_nodes_with_any_value_in_fk(local_items)
-            for db_nodes_group in self.get_nodes_from_database() if not self._only_queue else []:
+            for db_nodes_group in self._get_nodes_from_database() if not self._only_queue else []:
                 for local_node_with_fk in nodes_with_foreign_keys_at_local_items:
                     result: ServiceOrmItem = db_nodes_group.get_node(local_node_with_fk.model,
                                                                      **local_node_with_fk.get_primary_key_and_value())
@@ -2574,7 +2634,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                 yield item
             for item in local_items_:
                 yield item
-        local_items = list(self.get_local_nodes()) if not self._only_db else []
+        local_items = list(self._get_local_nodes()) if not self._only_db else []
         return tuple(ResultORMCollection(item) for item in merge(list(get_filtered_database_items()), local_items))
 
     def _get_node_by_joined_primary_key_and_value(self, joined_pk: str):
