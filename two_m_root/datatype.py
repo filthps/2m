@@ -94,6 +94,7 @@ class LinkedList:
                 tail = self._tail
                 self.__set_next(tail, node)
                 self.__set_prev(node, tail)
+        super().__init__()
 
     @property
     def head(self):

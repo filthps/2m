@@ -933,199 +933,12 @@ class ResultORMCollection:
         return new_collection
 
 
-class Sort:
-    def __init__(self, container):
-        self._reverse = False
-        self._field = None
-        self.__container = container
-
-    def _create_mapping(self) -> dict[str, Type[LinkedList]]:
-        """  Заполнить словарь ключами """
-        keys = map(lambda x: (x.upper(), x,), string.ascii_lowercase)
-        return {key: type(self.__container)() for key in keys}
-
-    @staticmethod
-    def _fill_mapping(data, nodes, target_column_name):
-        for item in nodes:
-            p = item.value[target_column_name][0]
-            data[(p.upper(), p,)].append(**item.get_attributes())
-
-
-class LettersSortSingleNodes(Sort):
-    def __init__(self, nodes: ResultORMCollection):
-        super().__init__(nodes)
-        self._input_nodes = nodes
-        if not isinstance(nodes, ResultORMCollection):
-            raise TypeError
-        self._nodes_in_sort = None  # Ноды, которые принимают участие в сортировке
-        self._other_items = None  # Ноды, которые не участвуют в сортировке (доб в конец)
-
-    def sort_by_alphabet(self):
-        """ Инициализировать словарь,
-        в котором ключами выступит первая буква из значения нашего ключевого слова, а значениями - очередь с нодой или нодами,
-        содержащими данное поле и значение"""
-        data_to_fill = self._create_mapping()
-        self._select_nodes_to_sort()
-        self._slice_other_nodes()
-        self._fill_mapping(data_to_fill, self._nodes_in_sort, self._field)
-        output = self._merge_mapping(data_to_fill)
-        output += self._other_items
-        return output
-
-    def sort_by_string_length(self):
-        def create_mapping(nodes):
-            """ Создать словарь, где ключи - длина """
-            return {len(node.value[self._field]): node for node in nodes}
-
-        self._slice_other_nodes()
-        self._select_nodes_to_sort()
-        mapping = create_mapping(self._nodes_in_sort)
-        mapping = dict(sorted(mapping.items(), key=lambda x: x[0]))
-        return self._merge_mapping(mapping) + self._other_items
-
-    def _select_nodes_to_sort(self):
-        """ Вернуть ноды, которые будут участвовать в сортировке """
-        self._nodes_in_sort = self._input_nodes.container_cls.__class__()
-        for node in self._input_nodes:
-            if self._field in node.value:
-                self._nodes_in_sort.append(**node.get_attributes())
-
-    def _slice_other_nodes(self):
-        """ Вырезать из коллекции ноды, ключевые поля у которых не заполнены.
-        Не изменять исходную коллекцию. Присвоить в self._other_items.
-        В дальнейшем их планируется добавить в конец сортированной коллекции """
-        self._other_items = self._input_nodes.container_cls.__class__()
-        for node in self._input_nodes:
-            if self._field not in node.value:
-                self._other_items.append(**node.get_attributes())
-
-    def _merge_mapping(self, data):
-        """ Словарь, который отсортирован, - 'сжать' его значения воедино, сохраняя последовательность """
-        output = self._input_nodes.container_cls.__class__()
-        for val in data.values():
-            output.append(val)
-        return output
-
-
-class LettersSortNodesChain(Sort):
-    def __init__(self, group: list[ResultORMCollection]):
-        super().__init__(group[0] if group else None)
-        self._nodes_chain = group
-        if type(group) is not list:
-            raise TypeError
-        if any(map(lambda x: type(x) is not ResultORMCollection, group)):
-            raise TypeError
-
-    def sort_by_alphabet(self):
-        """ 1) Свалить все ноды в кучу
-         2) Разложить по алфавиту в словарь
-         3) создать результирующий список с группами
-         4) Разложить группы нод парами, как было изначально, но на новые позиции"""
-        def add_all_nodes_in_one_container():
-            c = self._nodes_chain[0].container_cls
-            for index in self.__select_indexes():
-                group = self._nodes_chain[index]
-                c += group
-            return c
-
-        def get_new_positions_for_groups(mapping):
-            def get_node_index_in_mapping(node: "QueueItem", mapping) -> int:
-                key = node.get_primary_key_and_value(only_key=True)
-                key = (key.upper(), key,)
-                if key in mapping:
-                    return tuple(mapping).index(key)
-            for index in self.__select_indexes():
-                for group in self._nodes_chain[index]:
-                    pos = []
-                    for node in group:
-                        index = get_node_index_in_mapping(node, mapping)
-                        if index is not None:
-                            pos.append(index)
-                    if pos:
-                        yield min(pos)
-
-        def fill_result(mapping) -> list:
-            result = []
-            for group_index in get_new_positions_for_groups(mapping):
-                nodes_group = self._nodes_chain[group_index]
-                result.append(nodes_group)
-            return result
-
-        mapping = self._create_mapping()
-        joined_nodes = add_all_nodes_in_one_container()
-        self._fill_mapping(mapping, joined_nodes, self._field)
-        return fill_result(mapping).extend(self.__select_indexes(in_sort=False))
-
-    def sort_by_string_length(self):
-        def create_mapping():
-            m = {}
-            for i in self.__select_indexes():
-                group = self._nodes_chain[i]
-                ln = []
-                for node in group:
-                    if self._field in node.value:
-                        ln.append(len(node.value[self._field]))
-                if not ln:
-                    continue
-                m.update({min(ln): group})
-            return m
-
-        mapping = create_mapping()
-        mapping = dict(sorted(mapping.items(), key=lambda k: k[0]))
-        return list(mapping.values()).extend(self.__select_indexes(in_sort=False))
-
-    def __select_indexes(self, in_sort=True):
-        """ Выбрать индексы коллекции, которые участвуют в сортировке или не участвуют """
-        for n, collection in enumerate(self._nodes_chain):
-            for node in collection:
-                if in_sort:
-                    if self._field not in node.value:
-                        continue
-                    yield n
-                    continue
-                if self._field in node.value:
-                    continue
-                yield n
-
-
-class LettersSort(LettersSortSingleNodes, LettersSortNodesChain):
-    """ Сортировка нод по ключевому полю.
-     Простейшая сортировка при помощи встроенной функции sorted. """
-    def __init__(self, field_name, nodes: ResultORMCollection = None,
-                 nodes_group_chain: list[ResultORMCollection] = None, decr=True):
-        self._nodes_chain = nodes_group_chain
-        self._input_nodes = nodes
-        self._reverse = decr
-        self._field = field_name
-        if nodes is not None:
-            super(LettersSortSingleNodes, self).__init__(nodes)
-        if nodes_group_chain is not None:
-            super(LettersSortNodesChain, self).__init__(nodes_group_chain)
-        if not sum((bool(nodes), bool(nodes_group_chain),)) == 1:
-            raise ValueError
-        if type(self._reverse) is not bool:
-            raise TypeError
-        if not isinstance(self._field, str):
-            raise TypeError
-        if not self._field:
-            raise ValueError("Данная строка не может быть пустой")
-
-    def sort_by_alphabet(self):
-        return super().sort_by_alphabet() \
-            if self._nodes_chain else \
-            super(LettersSortNodesChain, self).sort_by_alphabet()
-
-    def sort_by_string_length(self):
-        return super().sort_by_string_length() \
-            if self._nodes_chain else \
-            super(LettersSortNodesChain, self).sort_by_string_length()
-
-
 class OrderByMixin(ABC):
     """ Реализация функционала для сортировки экземпляров ResultORMCollection в виде примеси для класса Result* """
     items = abstractproperty(lambda: ...)
     _merge = abstractmethod(lambda: ...)
     __iter__ = abstractmethod(lambda: ...)
+    _items_loader: "DataLoader" = ...
 
     def __init__(self: Union["Result", "JoinSelectResult"], *args, **kwargs):
         if not isinstance(self, (Result, JoinSelectResult)):
@@ -1199,23 +1012,7 @@ class OrderBySingleResultMixin(OrderByMixin):
                                 length=length, alphabet=alphabet, decr=decr)
 
     def _order_by(self, nodes: ResultORMCollection):
-        k = self._order_by_kwargs
-        by_column_name, by_primary_key, by_create_time = \
-            k["by_column_name"], k["by_primary_key"], k["by_create_time"]
-        sorted_nodes = None
-        if by_primary_key:
-            if nodes:
-                pk_string = tuple(nodes[0].get_primary_key_and_value())[0]
-                by_column_name = pk_string
-        if by_column_name:
-            nodes = nodes.get_all_visible_items
-            sorting = LettersSort(nodes, by_column_name, decr=k["decr"])
-            sorted_nodes = sorting.sort_by_alphabet()
-        if by_create_time:
-            items = map(lambda node: (node, node.created_at,), nodes)
-            getter = operator.itemgetter(1)
-            sorted_nodes = sorted(items, key=getter)
-        return self.__add_to_output_collection(map(lambda n: n[0], sorted_nodes), type_=nodes.container_cls)
+        ...
 
     @staticmethod
     def __add_to_output_collection(nodes, type_=None):
@@ -1239,29 +1036,7 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
                                 length=length, alphabet=alphabet, decr=decr)
 
     def _order_by(self, nodes: Iterable["ResultORMCollection"]) -> list["ResultORMCollection"]:
-        model = self._order_by_args[0]
-        k = self._order_by_kwargs
-        by_column_name, by_primary_key, by_create_time = \
-            k["by_column_name"], k["by_primary_key"], k["by_create_time"]
-        sort_by_length = k["length"]
-        nodes = list(self)
-        if by_primary_key:
-            if not nodes:
-                return []
-            by_column_name = nodes[0][0].get_primary_key_and_value()[0]
-        if by_column_name:
-            instance = LettersSort(by_column_name, nodes_group_chain=nodes, decr=k["decr"])
-            if sort_by_length:
-                return instance.sort_by_string_length()
-            return instance.sort_by_alphabet()
-        if by_create_time:
-            return self.__sort_nodes_by_create_time()
-
-    def __sort_nodes_by_create_time(self):
-        def nodes_map():
-            for nodes_group in self:
-                yield min(map(lambda node: node.created_at, nodes_group)), nodes_group
-        return list(dict(sorted(nodes_map(), key=operator.itemgetter(0))).values())
+        ...
 
 
 class SQLAlchemyQueryManager:
@@ -1404,7 +1179,63 @@ class ServiceOrmItem(QueueItem, AbsNode):
         pass
 
 
-class ServiceOrmContainer(Queue):
+class Sort:
+    def __init__(self, *a, **kw):
+        if not isinstance(self, ServiceOrmContainer):
+            raise TypeError
+        super().__init__(*a, **kw)
+        self._other_nodes = type(self)()
+    
+    def _output(self, sorted_items: dict):
+        container = self.__class__()
+        [container.append(**item.get_attributes()) for item in sorted_items.values()]
+        container += self._other_nodes
+        self._replace_inner(container.head, container.tail)
+
+
+class AlphabetSort(Sort):
+    def sort(self, column_name: str):
+        mapping = self._create_mapping()
+        self._fill_mapping(mapping, column_name)
+        self._output(mapping)
+
+    def _create_mapping(self) -> dict[str, Type[LinkedList]]:
+        keys = map(lambda x: (x.upper(), x,), string.ascii_lowercase)
+        return {key: type(self)() for key in keys}
+
+    def _fill_mapping(self, data, column_name, index=0):
+        for item in self:
+            value = item.value.get(column_name, None)
+            if value is None:
+                self._other_nodes.append(**item.get_attributes())
+                continue
+            if len(value) <= index:
+                self._other_nodes.append(**item.get_attributes())
+                continue
+            p = value[index]
+            data[(p.upper(), p,)].append(**item.get_attributes())
+
+
+class IntegerSort(Sort):
+    def sort(self, column_name: str):
+        mapping = self._collect_keys(column_name)
+        self._output(dict(sorted(mapping.items(), key=lambda x: x[0])))
+    
+    def _collect_keys(self, column):
+        mapping = {}
+        for node in self:
+            if column not in node.value:
+                self._other_nodes.append(**node.get_attributes())
+                continue
+            mapping.update({node.value[column]: node})
+        return mapping
+    
+    
+class CreateTimeSort(Sort):
+    ...  # todo
+
+
+class ServiceOrmContainer(Queue, IntegerSort, AlphabetSort, CreateTimeSort):
     """ Контейнер с композицией результата """
     LinkedListItem: Union[ServiceOrmItem, ResultORMItem] = ServiceOrmItem
 
@@ -2135,6 +1966,7 @@ class ResultCacheTools(Tool):
             raise TypeError
         if type(id_) is not int:
             raise TypeError
+        super().__init__(*args, **kw)
         self._id = str(id_)
         if not self._id:
             raise ValueError
@@ -2207,19 +2039,15 @@ class ResultCacheTools(Tool):
 
 class SliceResultMixin:
     """ Функционал для контроля численности выборки в виде реализации среза. Мемоизация параметров среза. """
-    DEFAULT_START = float("inf")
-    DEFAULT_END = 50
-    _get_nodes_from_database: Optional[callable] = None
-    _get_local_nodes: Optional[callable] = None
+    _items_loader: "DataLoader" = ...
 
     def __init__(self: Union["JoinSelectResult", "Result"]):
         if not issubclass(type(self), BaseResult):
             raise TypeError
         self._is_slice = False
-        self.__start: Optional[int] = None
-        self.__end: Optional[int] = None
 
     def reset_slice(self):
+        self._items_loader.pop_from_kwargs("start_index", "end_index", "ordering_direction")
         self._is_slice = False
         
     def __getitem__(self, item: slice):
@@ -2228,7 +2056,8 @@ class SliceResultMixin:
             self.reset_slice()
             return
         self._is_slice = True
-        return self.__slice_data()
+        self._items_loader.push_to_kwargs(start_index=item.start, end_index=item.stop,
+                                          ordering_direction="+" if item.step == 1 else "-")
 
     def __is_valid_slice(self, object_: slice):
         if not isinstance(object_, slice):
@@ -2236,60 +2065,119 @@ class SliceResultMixin:
         object_ = self.__support_negative_value(object_)
         if type(object_.start) is not int or type(object_.step) is not int or type(object_.stop) is not int:
             raise TypeError
-        if not object_.step == 1:
-            raise ValueError("Шаг среза не поддерживается")
+        if object_.step not in (1, -1,):
+            raise ValueError("Шаг среза поддерживает только 2 значения: 1 и -1")
         if object_.start < 1:
             raise ValueError
         if object_.stop < 1:
             raise ValueError
 
-    def _merge(self):
-        pass
-
-    def __slice(self):
-        """ slice применяется в качестве ограничителя количества выборки.
-         Если указан start, то он является условием. Результат окажется пустым,
-         если количество записей в результате окажется меньше, чем число, указанное на позиции start в срезе. """
-        if self.__start is None and self.__end is None:
-            return 
-        ...
-
-    @staticmethod
-    def __support_negative_value(slice_: slice) -> slice:
-        """ Отрицательные значения в текущей версии не поддерживаются """
-        ...  # todo: Придумать как реализовать отрицательные значения
-        return slice_
-
 
 class DataLoader:
-    AVAILABLE_ATTRIBUTE_NAMES = ("_only_db", "_only_queue", )
-    AVAILABLE_ATTRIBUTE_VALUES_TYPES = {"_only_queue": bool, "_only_db": bool}
+    AVAILABLE_ATTRIBUTES = {"only_queue": bool, "only_db": bool, "ordering_direction": ["+", "-"], "max_count": int,
+                            "order_by": [str], "start_index": int, "end_index": int}
+    DEFAULT_VALUES = {"max_count": 50, "ordering_direction": "+"}
 
     def __init__(self, database_node_getter: Optional[callable] = None, cache_node_getter: Optional[callable] = None,
-                 _only_db=False, _only_queue=False, **k):
+                 only_db=False, only_queue=False, **k):
         self.__db_items_loader = database_node_getter
         self.__local_items_loader = cache_node_getter
-        self.__kwargs_queue = k
+        self.__only_db = only_db
+        self.__only_queue = only_queue
+        self.__kwargs_queue = self.DEFAULT_VALUES.copy()
+        self.__kwargs_queue.update(k)
         self.__validate_params(self.__kwargs_queue)
 
-    def push_to_kwargs(self, **kwargs):
+    @property
+    def database_items(self):
+        if self.__only_queue:
+            return
+        return self.__db_items_loader(**self.__kwargs_queue)
+
+    @property
+    def local_items(self):
+        if self.__only_db:
+            return
+        return self.__local_items_loader(**self.__kwargs_queue)
+
+    @property
+    def is_only_database_items(self):
+        return self.__only_db
+
+    @property
+    def is_only_local_items(self):
+        return self.__only_queue
+
+    @property
+    def kwargs(self):
+        return self.__kwargs_queue.copy()
+
+    def push_to_kwargs(self, order_by=tuple(), **kwargs):
         self.__validate_params(kwargs)
+        self.__change_order_by(order_by=order_by, **kwargs)
         self.__kwargs_queue.update(kwargs)
 
-    def pop_from_kwargs(self, **kw):
+    def pop_from_kwargs(self, *a, order_by=tuple(), **kw):
+        self.__validate_params(kw)
+        self.__change_order_by(order_by=order_by, _delete=True)
+        for n in a:
+            del self.__kwargs_queue[n] if n in self.__kwargs_queue else None
+            if n in self.DEFAULT_VALUES:
+                self.__kwargs_queue.update({n: self.DEFAULT_VALUES[n]})
         for key, value in kw.items():
             if key not in self.__kwargs_queue:
-                raise KeyError
+                continue
             if not value == self.__kwargs_queue[key]:
                 continue
             self.__kwargs_queue.pop(key)
+            try:
+                val_from_default = self.DEFAULT_VALUES[key]
+            except KeyError:
+                continue
+            if not val_from_default == value:
+                self.__kwargs_queue.update({key: val_from_default})
 
-    @staticmethod
-    def __validate_params(params: dict):
-        pass
+    def __change_order_by(self, _delete=False, **kw):
+        if "order_by" in kw:
+            return
+        current_columns = self.__kwargs_queue.get("order_by", [])
+        if _delete:
+            if not current_columns:
+                return
+            if type(kw["order_by"]) is str:
+                current_columns.remove(kw["order_by"]) if kw["order_by"] in current_columns else None
+                return
+            [current_columns.remove(col) if col in current_columns else None for col in kw["order_by"]]
+            return
+        current_columns.append(*[kw["order_by"]] if type(kw["order_by"]) is str else kw["order_by"])
+
+    def __validate_params(self, params: dict):
+        if type(self.__only_db) is not bool:
+            raise TypeError
+        if type(self.__only_queue) is not bool:
+            raise TypeError
+        if self.__only_queue and self.__only_db:
+            raise ValueError
+        if not self.__only_queue:
+            if not callable(self.__db_items_loader):
+                raise ValueError
+        if not self.__only_db:
+            if not callable(self.__local_items_loader):
+                raise ValueError
+        for name, value in params.items():
+            v = self.AVAILABLE_ATTRIBUTES[name]
+            if isinstance(v, (list, tuple,)):
+                if type(v) is type:
+                    if type(value) is not v:
+                        raise TypeError
+                    continue
+                if not [i for i in v if i == value]:
+                    raise ValueError
+            if type(value) is not v:
+                raise TypeError
 
 
-class BaseResult(ABC, ResultCacheTools):
+class BaseResult(ABC, ResultCacheTools, SliceResultMixin):
     TEMP_HASH_PREFIX: str = ...
     _merge = abstractmethod(lambda: ResultORMCollection())  # Функция, которая делает репликацию нод из кеша поверх нод из бд
     _get_node_by_joined_primary_key_and_value = abstractmethod(lambda model_pk_val_str,
@@ -2297,16 +2185,13 @@ class BaseResult(ABC, ResultCacheTools):
     # входящей строке вида: 'имя_таблицы:primary_key:значение'
 
     def __init__(self, get_nodes_from_database=None, get_local_nodes=None, only_local=False, only_database=False, **kwargs):
-        self._get_nodes_from_database: Optional[callable] = get_nodes_from_database  # Функция, в которой происходит получение контейнера с нодами из бд
-        self._get_local_nodes: Optional[callable] = get_local_nodes  # Функция, в которой происходит получение контейнера с нодами из кеша
+        self._items_loader = DataLoader(database_node_getter=get_nodes_from_database, cache_node_getter=get_local_nodes,
+                                        only_queue=only_local, only_db=only_database)
         self._id = self.__gen_id(**{**kwargs, "only_local": only_local, "only_database": only_database})
-        self._only_queue = only_local
-        self._only_db = only_database
         self._pointer: Optional["Pointer"] = None
         self._is_slice = False
         self._is_sort = False
         self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
-        self.__is_valid()
         super().__init__(self._id)
         self._set_hash(self.items)
         self._set_primary_keys(self.__merged_data)
@@ -2385,7 +2270,9 @@ class BaseResult(ABC, ResultCacheTools):
             return True
 
     def __getitem__(self, item: Union[str, int, slice]):
-        return self.items[item]
+        if isinstance(item, (str, int,)):
+            return self.items[item]
+        return super().__getitem__(item)
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.items})"
@@ -2412,18 +2299,6 @@ class BaseResult(ABC, ResultCacheTools):
         str_ = "".join(map(lambda c: "".join(str(c)), kwargs.items()))
         return int.from_bytes(hashlib.md5(str_.encode("utf-8")).digest(), "big")
 
-    def __is_valid(self):
-        if not all(map(lambda i: isinstance(i, bool), (self._only_queue, self._only_db,))):
-            raise TypeError
-        if not sum((self._only_queue, self._only_db,)) in (0, 1,):
-            raise ValueError
-        if not self._only_queue:
-            if not callable(self._get_local_nodes):
-                raise ValueError
-        if not self._only_db:
-            if not callable(self._get_nodes_from_database):
-                raise ValueError
-
     @staticmethod
     def __get_hash_in_new_collection(collection, pk_hash) -> Optional[int]:
         for node_or_group in collection:
@@ -2431,7 +2306,7 @@ class BaseResult(ABC, ResultCacheTools):
                 return hash(node_or_group)
 
 
-class Result(SliceResultMixin, OrderBySingleResultMixin, BaseResult, ModelTools):
+class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
     """ Экземпляр данного класса возвращается функцией Tool.get_items() """
     TEMP_HASH_PREFIX = "simple_item_hash"
 
@@ -2447,14 +2322,10 @@ class Result(SliceResultMixin, OrderBySingleResultMixin, BaseResult, ModelTools)
         self._model = model
         super().__init__(*args, model=model, where=where, **kwargs)
 
-    def _merge(self, max_count=None, ordering_column="", ordering_direction: Literal["+", "-"] = "+"):
-        if self.is_slice:
-            return super()._merge()
+    def _merge(self):
         output = ServiceOrmContainer()
-        local_items = self._get_local_nodes()
-        database_items = self._get_nodes_from_database()
         [output.enqueue(**node.get_attributes())
-         for collection in (database_items, local_items,) for node in collection]
+         for collection in (self._items_loader.database_items, self._items_loader.local_items,) for node in collection]
         return ResultORMCollection(output)
 
     def _get_node_by_joined_primary_key_and_value(self, value: Union[str, int]) -> Optional[QueueItem]:
@@ -2462,7 +2333,7 @@ class Result(SliceResultMixin, OrderBySingleResultMixin, BaseResult, ModelTools)
         return self.items.get_node(model, **{pk: val})
 
 
-class JoinSelectResult(SliceResultMixin, OrderByJoinResultMixin, BaseResult, ModelTools):
+class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
     """
     Экземпляр этого класса возвращается функцией Tool.join_select()
     1 экземпляр этого класса 1 результат вызова Tool.join_select()
@@ -2522,18 +2393,16 @@ class JoinSelectResult(SliceResultMixin, OrderByJoinResultMixin, BaseResult, Mod
         return result
 
     def __getitem__(self, item: Union[int, slice]) -> ResultORMCollection:
-        if type(item) is slice:
-            return super().__getitem__(item)
-        data = self.items
-        if type(item) is not int:
-            raise TypeError
-        if item in range(len(data)):
-            return data[item]
-        for group in self:
-            if hash(group) == item:
-                return group
-            if group.hash_by_pk == item:
-                return group
+        if type(item) is int:
+            data = self.items
+            if item in range(len(data)):
+                return data[item]
+            for group in data:
+                if hash(group) == item:
+                    return group
+                if group.hash_by_pk == item:
+                    return group
+        return super().__getitem__(item)
 
     def __contains__(self, item: Union[int, ResultORMCollection, ResultORMItem]):
         if type(item) is int:
@@ -2634,7 +2503,7 @@ class JoinSelectResult(SliceResultMixin, OrderByJoinResultMixin, BaseResult, Mod
                 yield item
             for item in local_items_:
                 yield item
-        local_items = list(self._get_local_nodes()) if not self._only_db else []
+        local_items = list(self._items_loader.local_items)
         return tuple(ResultORMCollection(item) for item in merge(list(get_filtered_database_items()), local_items))
 
     def _get_node_by_joined_primary_key_and_value(self, joined_pk: str):
