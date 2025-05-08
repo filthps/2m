@@ -133,6 +133,25 @@ class ModelTools(ORMAttributes):
                 if not data["default"]:
                     yield column_name
 
+    @classmethod
+    def is_exists_column(cls, model, column_name):
+        cls.is_valid_model_instance(model)
+        if column_name in model().column_names:
+            return True
+        return False
+
+    @classmethod
+    def get_column_type(cls, model, column_name: str) -> Type:
+        cls.is_valid_model_instance(model)
+        if type(column_name) is not str:
+            raise TypeError
+        if not column_name:
+            raise ValueError
+        data = model().column_names
+        if not cls.is_exists_column(model, column_name):
+            raise ValueError
+        return data[column_name]["type"]
+
     @staticmethod
     def import_model(name: str):
         if type(name) is not str:
@@ -941,7 +960,7 @@ class OrderByMixin(ABC):
         if not isinstance(self, (Result, JoinSelectResult)):
             raise TypeError("Использовать данный класс в наследовании! Как миксин")
         super().__init__(*args, **kwargs)
-        self._is_sort = False
+        self.__is_sort = False
 
     def order_by(self, order_by: Union[str, tuple[str], list[str]] = "", ordering: Literal["+", "-"] = "+"):
         """
@@ -949,16 +968,17 @@ class OrderByMixin(ABC):
         :param ordering: Направление
         Включить сортировку для экземпляра целевого класса и запомнить аргументы
         """
-        self._is_sort = True
+        self.__is_valid(order_by, ordering)
+        self.__is_sort = True
         self._items_loader.reset_order_by()
         self._items_loader.push_to_kwargs(order_by=order_by, ordering_direction=ordering)
 
     def reset_ordering(self):
-        self._is_sort = False
+        self.__is_sort = False
         self._items_loader.reset_order_by()
 
     def _format_output(self, data_from_merge, super_=False):
-        if self._is_sort:
+        if self.__is_sort:
             data_from_merge = self._finish_sort(data_from_merge)
         return self._format_output(data_from_merge, super_=False)
 
@@ -969,10 +989,22 @@ class OrderByMixin(ABC):
         sorted_data = ...
         return sorted_data
 
+    @staticmethod
+    def __is_valid(order_column, direction):
+        if not isinstance(order_column, (list, tuple, str,)):
+            raise TypeError
+        if type(direction) is not str:
+            raise TypeError
+        if direction not in ["+", "-"]:
+            raise ValueError
+
 
 class OrderBySingleResultMixin(OrderByMixin):
     def _finish_sort(self, merged_data: "ServiceOrmContainer[ServiceOrmItem]"):
-        pass
+        while True:
+            column_to_change_ordering = self._items_loader.kwargs.get("order_by", []).pop(0)
+            if column_to_change_ordering is None:
+                merged_data.sort(column_to_change_ordering)
 
 
 class OrderByJoinResultMixin(OrderByMixin):
@@ -1176,7 +1208,28 @@ class CreateTimeSort(Sort):
     ...  # todo
 
 
-class ServiceOrmContainer(Queue, IntegerSort, AlphabetSort, CreateTimeSort):
+class Sort(IntegerSort, AlphabetSort, CreateTimeSort):
+    def sort(self, column_name: str):
+        self.__is_valid(column_name)
+        if not self:
+            return
+        model = self.__iter__().__next__().model
+        column_type = ModelTools.get_column_type(model, column_name)
+        if column_type is int:
+            return super().sort(column_name)
+        if column_type is str:
+            return super(IntegerSort, self).sort(column_name)
+        raise RuntimeError(f"Вариант сортировки для типа-{column_type} пока не предусмотрен")
+
+    @staticmethod
+    def __is_valid(name: str):
+        if type(name) is not str:
+            raise TypeError
+        if not name:
+            raise ValueError
+
+
+class ServiceOrmContainer(Queue, Sort):
     """ Контейнер с композицией результата. Поддерживает сортировку. """
     LinkedListItem: Union[ServiceOrmItem, ResultORMItem] = ServiceOrmItem
 
@@ -2062,7 +2115,7 @@ class DataLoader:
 
     @property
     def kwargs(self):
-        return self.__kwargs_queue.copy()
+        return copy.deepcopy(self.__kwargs_queue)
 
     def push_to_kwargs(self, order_by=tuple(), **kwargs):
         self.__validate_params(kwargs)
@@ -2266,7 +2319,7 @@ class BaseResult(ABC, ResultCacheTools, SliceResultMixin):
 
     @abstractmethod
     def _format_output(self, merged_items, super_=False) -> Union[ResultORMCollection[ResultORMItem],
-                                                                 Iterable[ResultORMCollection[ResultORMItem]]]:
+                                                                  Iterable[ResultORMCollection[ResultORMItem]]]:
         """ Закрыть результат в специально предназначенный,
         защищённый от рук конечного(и/или конченного) пользователя, контейнер - ResultORMCollection,
         с нодами типа ResultORMItem """
@@ -2360,7 +2413,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
 
     @property
     def items(self) -> tuple[ResultORMCollection]:
-        if self._is_sort:
+        if self.__is_sort:
             result = tuple(super().items)
         else:
             result = tuple(self._merge())
@@ -2489,7 +2542,9 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                 return node
 
     def _format_output(self, merged_items, super_=True):
-        pass
+        if super_:
+            return super()._format_output(merged_items)
+        return merged_items
 
 
 class PointerCacheTools(Tool):
