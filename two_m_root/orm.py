@@ -935,108 +935,49 @@ class ResultORMCollection:
 
 class OrderByMixin(ABC):
     """ Реализация функционала для сортировки экземпляров ResultORMCollection в виде примеси для класса Result* """
-    items = abstractproperty(lambda: ...)
-    _merge = abstractmethod(lambda: ...)
-    __iter__ = abstractmethod(lambda: ...)
     _items_loader: "DataLoader" = ...
 
     def __init__(self: Union["Result", "JoinSelectResult"], *args, **kwargs):
         if not isinstance(self, (Result, JoinSelectResult)):
             raise TypeError("Использовать данный класс в наследовании! Как миксин")
         super().__init__(*args, **kwargs)
-        self._order_by_args = None
-        self._order_by_kwargs = None
         self._is_sort = False
 
-    def order_by(self, *args, **kwargs):
-        """ Включить сортировку для экземпляра целевого класса и запомнить аргументы """
-        self._order_by_args = args
-        self._order_by_kwargs = kwargs
+    def order_by(self, order_by: Union[str, tuple[str], list[str]] = "", ordering: Literal["+", "-"] = "+"):
+        """
+        :param order_by: Сортировать данные по одному или нескольким столбцам
+        :param ordering: Направление
+        Включить сортировку для экземпляра целевого класса и запомнить аргументы
+        """
         self._is_sort = True
-        self.__is_valid_order_by_params(*args, **kwargs)
+        self._items_loader.reset_order_by()
+        self._items_loader.push_to_kwargs(order_by=order_by, ordering_direction=ordering)
 
-    @property
-    def items(self) -> Union[list["ResultORMCollection"], "ResultORMCollection"]:
-        if not self._is_sort:
-            return super().items
-        return self._order_by(super().items)
+    def reset_ordering(self):
+        self._is_sort = False
+        self._items_loader.reset_order_by()
 
-    def __iter__(self):
-        if not self._is_sort:
-            return super().__iter__()
-        return iter(self.items)
+    def _format_output(self, data_from_merge, super_=False):
+        if self._is_sort:
+            data_from_merge = self._finish_sort(data_from_merge)
+        return self._format_output(data_from_merge, super_=False)
 
     @abstractmethod
-    def _order_by(self, nodes: Union["ResultORMCollection", tuple["ResultORMCollection"]]) -> \
-            Union["ResultORMCollection", tuple["ResultORMCollection"]]:
-        ...
-
-    def __is_valid_order_by_params(self, model, by_column_name, by_primary_key, by_create_time, length, alphabet, decr):
-        QueueItem.is_valid_model_instance(model)
-        if by_column_name is not None:
-            if type(by_column_name) is not str:
-                raise TypeError
-            if not by_column_name:
-                raise ValueError
-            self.__check_exists_column_name(model, by_column_name)
-        if by_primary_key is not None:
-            if type(by_primary_key) is not bool:
-                raise TypeError
-        if by_create_time is not None:
-            if type(by_create_time) is not bool:
-                raise TypeError
-        if not isinstance(length, bool):
-            raise TypeError
-        if not isinstance(alphabet, bool):
-            raise TypeError
-        if type(decr) is not bool:
-            raise TypeError
-        if not sum([bool(by_column_name), bool(by_primary_key), bool(by_create_time)]) == 1:
-            raise ValueError("Нужно выбрать один из вариантов")
-        if not sum((length, alphabet,)) == 1:
-            raise ValueError
-
-    @staticmethod
-    def __check_exists_column_name(model, col_name):
-        if col_name not in model().column_names:
-            raise KeyError(f"В данной таблице отсутствует столбец {col_name}")
+    def _finish_sort(self, merged_data):
+        """ Ноды в каждом из контейнеров уже предварительно отсортированы.
+        Нужно выполнить финишную сортировку при слиянии. """
+        sorted_data = ...
+        return sorted_data
 
 
 class OrderBySingleResultMixin(OrderByMixin):
-    """ Реализация для 'одиночного результата',- запрос к одной таблице. См Tool.get_items() """
-    def order_by(self, by_column_name: Optional[str] = None, by_primary_key: Optional[bool] = None,
-                 by_create_time: Optional[bool] = None, length: bool = False, alphabet: bool = False,
-                 decr: bool = False):
-        return super().order_by(self._model, by_column_name=by_column_name,
-                                by_primary_key=by_primary_key, by_create_time=by_create_time,
-                                length=length, alphabet=alphabet, decr=decr)
-
-    def _order_by(self, nodes: ResultORMCollection):
-        ...
-
-    @staticmethod
-    def __add_to_output_collection(nodes, type_=None):
-        """ Упаковать выходной результат в экземпляр соответствующего класса коллекции """
-        inner = type_()
-        [inner.append(n) for n in nodes]
-        return ResultORMCollection(inner)
+    def _finish_sort(self, merged_data: "ServiceOrmContainer[ServiceOrmItem]"):
+        pass
 
 
-class OrderByJoinResultMixin(OrderByMixin, ModelTools):
-    """ Реализация для запросов с join. См Tool.join_select() """
-    def order_by(self: "JoinSelectResult", model, by_column_name: Optional[str] = None,
-                 by_primary_key: Optional[bool] = None,
-                 by_create_time: Optional[bool] = None, length: bool = False, alphabet: bool = False,
-                 decr: bool = False):
-        self.is_valid_model_instance(model)
-        if model not in self._models:
-            raise ValueError
-        return super().order_by(model, by_column_name=by_column_name,
-                                by_primary_key=by_primary_key, by_create_time=by_create_time,
-                                length=length, alphabet=alphabet, decr=decr)
-
-    def _order_by(self, nodes: Iterable["ResultORMCollection"]) -> list["ResultORMCollection"]:
-        ...
+class OrderByJoinResultMixin(OrderByMixin):
+    def _finish_sort(self, merged_data: list["ServiceOrmContainer[ServiceOrmItem]"]):
+        pass
 
 
 class SQLAlchemyQueryManager:
@@ -1236,7 +1177,7 @@ class CreateTimeSort(Sort):
 
 
 class ServiceOrmContainer(Queue, IntegerSort, AlphabetSort, CreateTimeSort):
-    """ Контейнер с композицией результата """
+    """ Контейнер с композицией результата. Поддерживает сортировку. """
     LinkedListItem: Union[ServiceOrmItem, ResultORMItem] = ServiceOrmItem
 
     @property
@@ -1314,9 +1255,20 @@ class ConnectionManager:
 
     @classmethod
     @property
-    def items(cls) -> Queue:
-        """ Вернуть локальные элементы """
+    def queue_items(cls) -> Queue:
+        """ Вернуть локальные элементы. Выполнять постановку в очередь новых элементов - здесь. """
         return cls.cache.get("ORMItems", Queue())
+
+    @classmethod
+    @property
+    def items_to_result(cls):
+        """ Форматировать очередь локальных элементов в специализированный контейнер,
+        поддерживающий сортировки и прочие прелести.
+        Брать ноды в результат - здесь. """
+        ServiceOrmContainer.LinkedListItem = ServiceOrmItem
+        result_container = ServiceOrmContainer()
+        [result_container.append(**node.get_attributes()) for node in cls.items]
+        return result_container
 
     @classmethod
     @property
@@ -1442,7 +1394,7 @@ class PrimaryKeyFactory(ModelTools):
         unique_data = {key: data[key] for key in data if key in unique_columns}
         node = None
         if unique_data:
-            node = cls.connection.items.search_nodes(model, **unique_data)
+            node = cls.connection.queue_items.search_nodes(model, **unique_data)
         if not node:
             return data
         value = node[0].value
@@ -1464,7 +1416,7 @@ class PrimaryKeyFactory(ModelTools):
     def _get_highest_autoincrement_pk_from_local(cls, model) -> Optional[int]:
         try:
             val = max(map(lambda x: x.get_primary_key_and_value(only_value=True),
-                          cls.connection.items.search_nodes(model)))
+                          cls.connection.queue_items.search_nodes(model)))
         except ValueError:
             return None
         return val
@@ -1542,7 +1494,7 @@ class Tool(ORMAttributes):
         cls.is_valid_model_instance(model)
         if not all((isinstance(v, (int, str, type(None))) for v in value.values())):
             raise NodeColumnValueError
-        items: Queue = cls.connection.items
+        items: Queue = cls.connection.queue_items
         items.LinkedListItem = QueueItem
         attrs = {"_model": model, "_ready": _ready,
                  "_insert": _insert, "_update": _update,
@@ -1596,7 +1548,7 @@ class Tool(ORMAttributes):
                         raise OperationalError
 
             def add_to_queue():
-                result = Queue()
+                result = ServiceOrmContainer()
                 result.LinkedListItem = ServiceOrmItem
                 for item in items_db:
                     col_names = model().column_names
@@ -1606,8 +1558,8 @@ class Tool(ORMAttributes):
 
         def select_from_cache(items_count=None):
             if items_count is not None:
-                return cls.connection.items.search_nodes(model, **attrs)[:items_count]
-            return cls.connection.items.search_nodes(model, **attrs)
+                return cls.connection.queue_items.search_nodes(model, **attrs)[:items_count]
+            return cls.connection.queue_items.search_nodes(model, **attrs)
         return Result(get_nodes_from_database=select_from_db, get_local_nodes=select_from_cache,
                       only_local=_queue_only, only_database=_db_only, model=model, where=attrs)
 
@@ -1769,7 +1721,7 @@ class Tool(ORMAttributes):
 
         def collect_all_local_nodes():  # n**2!
             heap = Queue()
-            temp = cls.connection.items
+            temp = cls.connection.queue_items
             for model in models:  # O(n)
                 heap += temp.search_nodes(model, **where.get(model.__name__, {}))  # O(n * k)
             return heap
@@ -1818,7 +1770,7 @@ class Tool(ORMAttributes):
         if not isinstance(node_pk_value, (str, int,)):
             raise TypeError
         primary_key_field_name = ModelTools.get_primary_key_column_name(model)
-        left_node = cls.connection.items.get_node(model, **{primary_key_field_name: node_pk_value})
+        left_node = cls.connection.queue_items.get_node(model, **{primary_key_field_name: node_pk_value})
         return left_node.type if left_node is not None else None
 
     @classmethod
@@ -1833,7 +1785,7 @@ class Tool(ORMAttributes):
         if not isinstance(node_or_nodes, (tuple, list, set, frozenset, str, int,)):
             raise TypeError
         primary_key_field_name = ModelTools.get_primary_key_column_name(model)
-        items = cls.connection.items
+        items = cls.connection.queue_items
         if isinstance(node_or_nodes, (str, int,)):
             items.remove(model, **{primary_key_field_name: node_or_nodes})
         if isinstance(node_or_nodes, (tuple, list, set, frozenset)):
@@ -1856,7 +1808,7 @@ class Tool(ORMAttributes):
         if not isinstance(field_or_fields, (tuple, list, set, frozenset, str,)):
             raise TypeError
         primary_key_field_name = ModelTools.get_primary_key_column_name(model)
-        old_node = cls.connection.items.get_node(model, **{primary_key_field_name: pk_field_value})
+        old_node = cls.connection.queue_items.get_node(model, **{primary_key_field_name: pk_field_value})
         if not old_node:
             return
         node_data = old_node.get_attributes()
@@ -1875,7 +1827,7 @@ class Tool(ORMAttributes):
                 raise NodePrimaryKeyError("Нельзя удалить поле, которое является первичным ключом")
             if field_or_fields in node_data:
                 del node_data[field_or_fields]
-        container = cls.connection.items
+        container = cls.connection.queue_items
         container.enqueue(**node_data)
         cls.__set_cache(container)
 
@@ -1883,7 +1835,7 @@ class Tool(ORMAttributes):
     def is_node_from_cache(cls, _model=None, **attrs) -> bool:
         model = _model or cls._model_obj
         cls.is_valid_model_instance(model)
-        items = cls.connection.items.search_nodes(model, **attrs)
+        items = cls.connection.queue_items.search_nodes(model, **attrs)
         if len(items) > 1:
             warnings.warn(f"Нашлось больше одной ноды/нод, - {len(items)}: {items}")
         if items:
@@ -1894,7 +1846,7 @@ class Tool(ORMAttributes):
     def is_node_ready(cls, _model=None, **attrs):
         model = _model or cls._model_obj
         cls.is_valid_model_instance(model)
-        items = cls.connection.items.search_nodes(model, **attrs)
+        items = cls.connection.queue_items.search_nodes(model, **attrs)
         if not items:
             return
         if not len(items) == 1:
@@ -1916,7 +1868,7 @@ class Tool(ORMAttributes):
                 node_data = PrimaryKeyFactory.create_primary(node.model, **node.get_attributes())
                 updated_remaining_nodes.enqueue(**node_data)
             return updated_remaining_nodes
-        database_adapter = SQLAlchemyQueryManager(DATABASE_PATH, cls.connection.items)
+        database_adapter = SQLAlchemyQueryManager(DATABASE_PATH, cls.connection.queue_items)
         database_adapter.start()
         cls.__set_cache(actualize_node_data(database_adapter.remaining_nodes))
         sys.exit()
@@ -2137,6 +2089,9 @@ class DataLoader:
             if not val_from_default == value:
                 self.__kwargs_queue.update({key: val_from_default})
 
+    def reset_order_by(self):
+        self.__kwargs_queue["order_by"] = []
+
     def __change_order_by(self, _delete=False, **kw):
         if "order_by" in kw:
             return
@@ -2179,18 +2134,12 @@ class DataLoader:
 
 class BaseResult(ABC, ResultCacheTools, SliceResultMixin):
     TEMP_HASH_PREFIX: str = ...
-    _merge = abstractmethod(lambda: ResultORMCollection())  # Функция, которая делает репликацию нод из кеша поверх нод из бд
-    _get_node_by_joined_primary_key_and_value = abstractmethod(lambda model_pk_val_str,
-                                                               sep="...": ...)  # Вернуть ноду по
-    # входящей строке вида: 'имя_таблицы:primary_key:значение'
 
     def __init__(self, get_nodes_from_database=None, get_local_nodes=None, only_local=False, only_database=False, **kwargs):
         self._items_loader = DataLoader(database_node_getter=get_nodes_from_database, cache_node_getter=get_local_nodes,
                                         only_queue=only_local, only_db=only_database)
         self._id = self.__gen_id(**{**kwargs, "only_local": only_local, "only_database": only_database})
         self._pointer: Optional["Pointer"] = None
-        self._is_slice = False
-        self._is_sort = False
         self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
         super().__init__(self._id)
         self._set_hash(self.items)
@@ -2305,6 +2254,26 @@ class BaseResult(ABC, ResultCacheTools, SliceResultMixin):
             if str(node_or_group.hash_by_pk) == pk_hash:
                 return hash(node_or_group)
 
+    @abstractmethod
+    def _get_node_by_joined_primary_key_and_value(self, input_val: Union[str, int]):
+        """ Вернуть ноду по входящей строке вида: 'имя_таблицы:primary_key:значение' """
+        pass
+
+    @abstractmethod
+    def _merge(self):
+        """ Репликация нод из кеша поверх нод из бд """
+        return self._format_output(...)
+
+    @abstractmethod
+    def _format_output(self, merged_items, super_=False) -> Union[ResultORMCollection[ResultORMItem],
+                                                                 Iterable[ResultORMCollection[ResultORMItem]]]:
+        """ Закрыть результат в специально предназначенный,
+        защищённый от рук конечного(и/или конченного) пользователя, контейнер - ResultORMCollection,
+        с нодами типа ResultORMItem """
+        if super_:
+            return super()._format_output(merged_items)
+        return ...
+
 
 class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
     """ Экземпляр данного класса возвращается функцией Tool.get_items() """
@@ -2322,15 +2291,20 @@ class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
         self._model = model
         super().__init__(*args, model=model, where=where, **kwargs)
 
-    def _merge(self):
+    def _merge(self) -> ResultORMCollection:
         output = ServiceOrmContainer()
         [output.enqueue(**node.get_attributes())
          for collection in (self._items_loader.database_items, self._items_loader.local_items,) for node in collection]
-        return ResultORMCollection(output)
+        return self._format_output(output)
 
     def _get_node_by_joined_primary_key_and_value(self, value: Union[str, int]) -> Optional[QueueItem]:
         model, pk, val = self._parse_joined_primary_key_and_value(value)
         return self.items.get_node(model, **{pk: val})
+
+    def _format_output(self, merged_items, super_=True) -> ResultORMCollection[ResultORMItem]:
+        if super_:
+            return super()._format_output(merged_items)
+        return ResultORMCollection(merged_items)
 
 
 class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
@@ -2468,7 +2442,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                         yield db_nodes_group
                         currently_added_hash.append(db_nodes_group.hash_by_pk)
 
-        def merge(db_items, local_items_):
+        def merge(db_items, local_items_) -> Iterator[ServiceOrmContainer]:
             """
             :param db_items: Коллекция из базы данных
             :param local_items_:Коллекция из локальных элементов очереди на коммит в базу
@@ -2504,7 +2478,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
             for item in local_items_:
                 yield item
         local_items = list(self._items_loader.local_items)
-        return tuple(ResultORMCollection(item) for item in merge(list(get_filtered_database_items()), local_items))
+        return self._format_output(tuple(merge(list(get_filtered_database_items()), local_items)))
 
     def _get_node_by_joined_primary_key_and_value(self, joined_pk: str):
         model_name, primary_key, value = self._parse_joined_primary_key_and_value(joined_pk)
@@ -2513,6 +2487,9 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
             node = collection.get_node(model_instance, **{primary_key: value})
             if node:
                 return node
+
+    def _format_output(self, merged_items, super_=True):
+        pass
 
 
 class PointerCacheTools(Tool):
