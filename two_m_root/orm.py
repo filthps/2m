@@ -1002,14 +1002,53 @@ class OrderByMixin(ABC):
 class OrderBySingleResultMixin(OrderByMixin):
     def _finish_sort(self, merged_data: "ServiceOrmContainer[ServiceOrmItem]"):
         while True:
-            column_to_change_ordering = self._items_loader.kwargs.get("order_by", []).pop(0)
+            try:
+                column_to_change_ordering = self._items_loader.kwargs.get("order_by", []).pop(0)
+            except IndexError:
+                return
             if column_to_change_ordering is None:
                 merged_data.sort(column_to_change_ordering)
 
 
 class OrderByJoinResultMixin(OrderByMixin):
     def _finish_sort(self, merged_data: list["ServiceOrmContainer[ServiceOrmItem]"]):
-        pass
+        def sort_(input_data: list["ServiceOrmContainer"], col_name: str) -> list["ServiceOrmContainer[ServiceOrmItem]"]:
+            def create_index_mapping():
+                """ Собрать словарь вида: {сортируемая_нода: индекс_в_исходном_списке}. """
+                return {node: index
+                        for index, container in enumerate(input_data)
+                        for node in container if col_name in node.value}
+
+            def sort_container_with_sorting_nodes(mapping: dict, col_name: str) -> ServiceOrmContainer:
+                """ Сортировать контейнер с нодами, участвующими в сортировке,
+                используя средства встроенные в сам контейнер """
+                ServiceOrmContainer.LinkedListItem = ServiceOrmItem
+                container = ServiceOrmContainer()
+                [container.append(**node.get_attributes()) for node in mapping]
+                container.sort(col_name)
+                return container
+
+            def sort_mapping(mapping: dict, sorted_container: ServiceOrmContainer) -> dict:
+                return {node: mapping[node] for node in sorted_container}
+
+            def collect_result_items_to_output_list(sorted_mapping: dict):
+                """ Обойти результирующий mapping по значениям,
+                которые представляют уже отсортированные индексы от исходного списка.
+                 Собрать элементы из исходного списка в данном порядке. """
+                return [input_data[index] for index in sorted_mapping.values()]
+
+            mapping = create_index_mapping()
+            sorted_nodes = sort_container_with_sorting_nodes(mapping, col_name)
+            sorted_mapping = sort_mapping(mapping, sorted_nodes)
+            return collect_result_items_to_output_list(sorted_mapping)
+
+        sorted_data = merged_data
+        while True:
+            try:
+                column_to_change_ordering = self._items_loader.kwargs.get("order_by", []).pop(0)
+            except IndexError:
+                return sorted_data
+            sorted_data = sort_(sorted_data, column_to_change_ordering)
 
 
 class SQLAlchemyQueryManager:
@@ -1208,8 +1247,8 @@ class CreateTimeSort(Sort):
     ...  # todo
 
 
-class Sort(IntegerSort, AlphabetSort, CreateTimeSort):
-    def sort(self, column_name: str):
+class SortManager(IntegerSort, AlphabetSort, CreateTimeSort):
+    def sort(self, column_name: Union[str, int]):
         self.__is_valid(column_name)
         if not self:
             return
@@ -1222,14 +1261,16 @@ class Sort(IntegerSort, AlphabetSort, CreateTimeSort):
         raise RuntimeError(f"Вариант сортировки для типа-{column_type} пока не предусмотрен")
 
     @staticmethod
-    def __is_valid(name: str):
+    def __is_valid(name):
+        if type(name) is int:
+            return
         if type(name) is not str:
             raise TypeError
         if not name:
             raise ValueError
 
 
-class ServiceOrmContainer(Queue, Sort):
+class ServiceOrmContainer(Queue, SortManager):
     """ Контейнер с композицией результата. Поддерживает сортировку. """
     LinkedListItem: Union[ServiceOrmItem, ResultORMItem] = ServiceOrmItem
 
