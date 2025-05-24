@@ -42,8 +42,7 @@ from two_m.main import MEMCACHE_PATH, DATABASE_PATH, RELEASE_INTERVAL_SECONDS, C
     MAX_RETRIES, WRAP_ITEM_MAX_LENGTH, ADD_TABLE_NAME_PREFIX  # from user's package
 
 
-class ORMAttributes:
-
+class ModelTools:
     @staticmethod
     def is_valid_model_instance(item):
         if isinstance(item, (int, str, float, bytes, bytearray, set, dict, list, tuple, type(None))):
@@ -58,8 +57,6 @@ class ORMAttributes:
             return
         raise InvalidModel
 
-
-class ModelTools(ORMAttributes):
     @classmethod
     def is_autoincrement_primary_key(cls, model: Type[CustomModel]) -> bool:
         cls.is_valid_model_instance(model)
@@ -75,10 +72,10 @@ class ModelTools(ORMAttributes):
             if data["primary_key"]:
                 return data["type"]
 
-    @staticmethod
-    def get_unique_columns(model, data: dict) -> Iterator[str]:
+    @classmethod
+    def get_unique_columns(cls, model, data: dict) -> Iterator[str]:
         """ Получить названия столбцов с UNIQUE=TRUE (их значения присутствуют в ноде) """
-        ORMAttributes.is_valid_model_instance(model)
+        cls.is_valid_model_instance(model)
         model_data = model().column_names
         if "ui_hidden" in data:
             del data["ui_hidden"]
@@ -147,10 +144,7 @@ class ModelTools(ORMAttributes):
 
 
 class NodeTools:
-    """
-    Средства валидации для всех объектов, производных от QueueItem
-    """
-
+    """ Средства валидации для всех объектов, производных от QueueItem """
     @staticmethod
     def _is_valid_primary_key(d: dict, model: CustomModel):
         if not isinstance(d, dict):
@@ -215,8 +209,19 @@ class NodeTools:
         return True
 
 
-class QueueItem(LinkedListItem, ModelTools, NodeTools):
-    """ Иммутабельный класс ноды для Queue. Нода для инъекции в базу. """
+class AbsNode(ABC):
+    @property
+    @abstractmethod
+    def model(self):
+        pass
+
+    @abstractmethod
+    def get_primary_key_and_value(self, only_key=False, only_value=False, as_tuple=False):
+        pass
+
+
+class QueueItem(LinkedListItem, ModelTools, NodeTools, AbsNode):
+    """ Нода для постановки в очередь с последующей инъекцией в базу данных. """
     def __init__(self, _insert=False, _update=False, _delete=False,
                  _model=None, _create_at=None, _count_retries=0, _ready=False,  **node_data):
         super().__init__(**node_data)
@@ -273,7 +278,6 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
         self.__is_ready = self._check_not_null_fields_in_node_value(self)
         return self.__is_ready
 
-
     @property
     def type(self) -> str:
         return "_insert" if self.__insert else "_update" if self.__update else "_delete"
@@ -286,7 +290,7 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
         result.update({"_model": self.__model, "_insert": False,
                        "_update": False, "_ready": self.__is_ready,
                        "_delete": False, "_count_retries": self.retries})
-        result.update({self.type: True})
+        result.update({self.type: True}) if self.type is not None else None
         result.update(with_update) if with_update else None
         return result
 
@@ -304,11 +308,6 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
 
     def __len__(self):
         return len(self._val)
-
-    def __eq__(self, other: "QueueItem"):
-        if type(other) is not type(self):
-            return False
-        return self.__hash__() == hash(other)
 
     def __contains__(self, item: str):
         if not isinstance(item, str):
@@ -340,13 +339,6 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
         attributes.update({"_create_at": create_at.strftime("%d:%m:%S")})
         return ', '.join(map(lambda i: '='.join([str(e) for e in i]), attributes.items()))
 
-    def __hash__(self):
-        value = self.value
-        if ModelTools.is_autoincrement_primary_key(self.__model):
-            del value[self.get_primary_key_and_value(only_key=True)]
-        str_ = "".join(map(lambda x: str(x), itertools.chain(*value.items())))
-        return int.from_bytes(hashlib.md5(str_.encode("utf-8")).digest(), "big")
-
     def __getitem__(self, item: str):
         if type(item) is not str:
             raise TypeError
@@ -355,32 +347,7 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools):
         return self.value[item]
 
 
-class EmptyOrmItem(LinkedListItem):
-    """
-    Пустой класс для возврата пустой "ноды". Заглушка
-    """
-    def __eq__(self, other):
-        if type(other) is type(self):
-            return True
-        return False
-
-    def __len__(self):
-        return 0
-
-    def __bool__(self):
-        return False
-
-    def __repr__(self):
-        return f"{type(self).__name__}()"
-
-    def __str__(self):
-        return "None"
-
-    def __hash__(self):
-        return 0
-
-
-class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
+class ResultORMItem(LinkedListItem, NodeTools, AbsNode):
     def __init__(self, _model, _primary_key: Optional[dict], _ui_hidden=False, **k):
         self._primary_key = _primary_key
         self._model = _model
@@ -402,16 +369,18 @@ class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
         str_ = "".join(map(lambda x: f"{x[0]}{x[1]}", zip(pk.keys(), pk.values())))
         return int.from_bytes(hashlib.md5(str_.encode("utf-8")).digest(), "big")
 
-    def get_primary_key_and_value(self, only_key=False, only_val=False):
+    def get_primary_key_and_value(self, only_key=False, only_value=False, as_tuple=False):
         if type(only_key) is not bool:
             raise TypeError
-        if not isinstance(only_val, bool):
+        if not isinstance(only_value, bool):
             raise TypeError
-        if only_val and only_key:
+        if type(as_tuple) is not bool:
+            raise TypeError
+        if sum((only_value, only_key, as_tuple)) not in [0, 1]:
             raise ValueError
         if only_key:
             return tuple(self._primary_key.keys())[0]
-        if only_val:
+        if only_value:
             return tuple(self._primary_key.values())[0]
         return self._primary_key.copy()
 
@@ -462,8 +431,8 @@ class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
             new_values.update({".".join(parts): value})
         self._val = new_values
 
-    def get_attributes(self, *args, **kwargs):
-        return {"_model": self._model, "_primary_key": self._primary_key, **self._val}
+    def get_attributes(self):
+        return {"_model": self._model, "_primary_key": self._primary_key, "_ui_hidden": self._hidden, **self._val}
 
     def __bool__(self):
         if not self.value:
@@ -513,7 +482,7 @@ class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
             raise TypeError
         if type(self._val) is not dict:
             raise TypeError
-        self.is_valid_model_instance(self._model)
+        ModelTools.is_valid_model_instance(self._model)
         if not self.value:
             raise ValueError
         self._is_valid_primary_key(self._primary_key, self._model)
@@ -530,6 +499,132 @@ class ResultORMItem(LinkedListItem, ORMAttributes, NodeTools):
             raise TypeError
         if any(filter(lambda x: not any(x), names)):
             raise ValueError
+
+
+class QueueNodeSearchTool(LinkedList):
+    """ Данный класс делает поиск ноды в очереди(по первичному ключу и значению) за O(1), вместо O(n).
+    Добавление ноды в конец за O(1) - вместо O(1)
+    Добавление нод в начало и середину за O(n) - вместо O(n)
+    Замена ноды за O(1) - вместо O(1)
+    Удаление ноды за O(1) - вместо O(n)
+    Поиск ноды за O(1) - вместо O(1)
+    Жертвуем O(n) памяти."""
+    LinkedListItem = ...
+
+    def __init__(self, *args, **kwargs):
+        self.__items_hash_map = {}  # primary_key_val_hash: node_item
+        self.__node_index_hash_map = {}  # node_index: primary_key_val_hash
+        super().__init__(*args, **kwargs)
+        [self.__add_node(node) for node in self]
+
+    def get_node(self, model, **primary_key_data):
+        if not len(primary_key_data) == 1:
+            raise ValueError
+        try:
+            hash_val = self.__get_hash_value(model.__name__, *tuple(primary_key_data.items())[0])
+            return self.__items_hash_map[hash_val]
+        except KeyError:
+            return
+
+    def append(self, *args, **kwargs):
+        new_item = self.LinkedListItem(*args, **kwargs)
+        self.__is_valid_node(new_item)
+        super().append(node_item=new_item)
+        self.__add_node(new_item)
+        self.__node_index_hash_map[new_item.index] = self.__get_hash_value(new_item.model.__name__,
+                                                                           *new_item.get_primary_key_and_value(as_tuple=True))
+
+    def add_to_head(self, **kwargs):  # todo N**2
+        new_item = self.LinkedListItem(**kwargs)
+        super().add_to_head(node_item=new_item)
+        self.__add_node(new_item)
+        self.__create_indexes()
+
+    def replace(self, old_node, new_node):
+        self.__is_valid_node(old_node)
+        self.__is_valid_node(new_node)
+        super().replace(old_node, new_node)
+        hash_val = self.__get_hash_value(old_node.model.__name__,
+                                         *old_node.get_primary_key_and_value(as_tuple=True))
+        self.__items_hash_map[hash_val] = new_node
+        self.__node_index_hash_map[new_node.index] = hash_val
+
+    def __getitem__(self, node_index):
+        if not isinstance(node_index, int):
+            raise TypeError
+        node_index = self._support_negative_index(node_index)
+        try:
+            hash_val = self.__node_index_hash_map[node_index]
+            #print(node_index, hash_val)  # Проблема в том, что все значения одинаковы!!
+            # 0 19365211018086228525341359130217813848
+            # 1 19365211018086228525341359130217813848
+            #
+            #
+            return self.__items_hash_map[hash_val]
+        except KeyError:
+            raise IndexError
+
+    def __setitem__(self, key, value):
+        if not isinstance(value, (dict, self.LinkedListItem)):
+            raise TypeError
+        new_node = value if type(value) is self.LinkedListItem else self.LinkedListItem(**value)
+        self.__is_valid_node(new_node)
+        super().__setitem__(key, new_node)
+        old_value = self.__node_index_hash_map.get(key, None)
+        if old_value is not None:
+            del self.__items_hash_map[old_value]
+        self.__items_hash_map[self.__get_hash_value(new_node.model.__name__,
+                                                    *new_node.get_primary_key_and_value(as_tuple=True))] = new_node
+        self.__create_indexes()
+
+    def __delitem__(self, node_index):
+        super().__delitem__(node_index)
+        del self.__items_hash_map[self.__node_index_hash_map[node_index]]
+        self.__create_indexes()
+
+    def __contains__(self, item: LinkedListItem):
+        if not isinstance(item, self.LinkedListItem):
+            return False
+        try:
+            self.__is_valid_node(item)
+        except AttributeError:
+            return False
+        except TypeError:
+            return False
+        return self.__get_hash_value(item.model.__name__, ) in self.__items_hash_map
+
+    def __add_node(self, new_item):
+        self.__is_valid_node(new_item)
+        hash_value = self.__get_hash_value(new_item.model.__name__, *new_item.get_primary_key_and_value(as_tuple=True))
+        self.__items_hash_map.update({hash_value: new_item})
+        self.__node_index_hash_map[new_item.index] = hash_value
+
+    def __create_indexes(self):
+        self.__node_index_hash_map = dict(zip(range(len(self)),
+                                              map(lambda n: self.__get_hash_value(n.model.__name__,
+                                                                                  *n.get_primary_key_and_value(as_tuple=True)), self)))
+
+    @staticmethod
+    def __get_hash_value(*args):
+        return int.from_bytes(hashlib.md5("".join(map(str, args)).encode("utf-8")).digest(), "big")
+
+    @staticmethod
+    def __is_valid_node(node):
+        if not hasattr(node, "get_primary_key_and_value"):
+            raise AttributeError
+        if not callable(getattr(node, "get_primary_key_and_value")):
+            raise TypeError
+        if not isinstance(node.get_primary_key_and_value(), dict):
+            raise ValueError
+        if not len(node.get_primary_key_and_value()) == 1:
+            raise ValueError
+        if type(node.get_primary_key_and_value(only_key=True)) is not str:
+            raise TypeError
+        if not isinstance(node.get_primary_key_and_value(only_value=True), (int, str)):
+            raise TypeError
+        if not hasattr(node, "model"):
+            raise AttributeError
+        ModelTools.is_valid_model_instance(node.model)
 
 
 class Queue(LinkedList):
@@ -569,11 +664,6 @@ class Queue(LinkedList):
         if left_node:
             self._remove_from_queue(left_node)
             return left_node
-
-    def order_by(self, model: Type[CustomModel],
-                 by_column_name: Optional[str] = None, by_primary_key: bool = False,
-                 by_create_time: bool = False, decr: bool = False):
-        super().order_by(model, by_column_name, by_primary_key, by_create_time, decr)
 
     def get_related_nodes(self, main_node: QueueItem, other_container=None) -> "Queue":
         """ Получить все связанные (внешним ключом) с передаваемой нодой ноды.
@@ -661,31 +751,23 @@ class Queue(LinkedList):
     def __str__(self):
         return "\n".join(tuple(str(m) for m in self))
 
-    def __contains__(self, item: QueueItem) -> bool:
-        if type(item) is not QueueItem:
-            return False
-        for node in self:
-            if hash(node) == item.__hash__():
-                return True
-        return False
-
-    def __add__(self, other: "Queue"):
-        if not type(other) is self.__class__:
+    def __add__(self, other):
+        if type(other) is not self.__class__:
             raise TypeError
         result_instance = self.__class__()
-        [result_instance.append(**n.get_attributes()) for n in self]  # O(n)
-        [result_instance.enqueue(**n.get_attributes()) for n in other]  # O(n**2) todo n**2!
+        [result_instance.append(**n.get_attributes()) for n in self]
+        [result_instance.enqueue(**n.get_attributes()) for n in other]
         return result_instance
 
     def __iadd__(self, other):
         if not isinstance(other, type(self)):
             raise TypeError
-        result: Queue = self + other
+        result = self + other
         self._head = result.head
         self._tail = result.tail
         return result
 
-    def __sub__(self, other: "Queue"):
+    def __sub__(self, other):
         if not isinstance(other, self.__class__):
             raise TypeError
         result_instance = copy.deepcopy(self)
@@ -702,16 +784,6 @@ class Queue(LinkedList):
                 output.enqueue(**left_node.get_attributes())
                 output.enqueue(**right_node.get_attributes())
         return output
-
-    def __eq__(self, other):
-        if not isinstance(other, self.__class__):
-            return False
-        if not len(self) == len(other):
-            return False
-        return hash(self) == hash(other)
-
-    def __hash__(self):
-        return sum(map(hash, self))
 
     def _replication(self, **new_node_complete_data: dict) -> tuple[Optional[QueueItem], QueueItem]:  # O(l * k) + O(n) + O(1) = O(n)
         """
@@ -735,7 +807,6 @@ class Queue(LinkedList):
             new_node_data.update({dml_type: True, "_ready": new_node.ready})
             new_node_data.update({"_create_at": new_node.created_at})
             return self.LinkedListItem(**new_node_data)
-
         exists_item = self.get_node(potential_new_item.model, **potential_new_item.get_primary_key_and_value())  # O(n)
         if not exists_item:
             new_item = potential_new_item
@@ -814,6 +885,10 @@ class Queue(LinkedList):
                     self._remove_from_queue(ex_node)
                     self.append(**new_values)
                     break
+
+
+class Queue(QueueNodeSearchTool, Queue):
+    LinkedListItem = QueueItem
 
 
 class ResultORMCollection:
@@ -1416,22 +1491,49 @@ class SQLAlchemyQueryManager:
         return self._sorted
 
 
-class ServiceOrmItem(QueueItem):
+class ServiceOrmItem(QueueItem, AbsNode):
+    """ Данный тип нод используется для вывода результата """
     @property
     def hash_by_pk(self):
         str_ = "".join(map(str, self.get_primary_key_and_value(as_tuple=True)))
         return int.from_bytes(hashlib.md5(str_.encode("utf-8")).digest(), "big")
 
+    def __hash__(self):
+        value = self.value
+        if ModelTools.is_autoincrement_primary_key(self.model):
+            del value[self.get_primary_key_and_value(only_key=True)]
+        str_ = "".join(map(lambda x: str(x), itertools.chain(*value.items())))
+        return int.from_bytes(hashlib.md5(str_.encode("utf-8")).digest(), "big")
+
+    def __eq__(self, other: "QueueItem"):
+        if type(other) is not type(self):
+            return False
+        return self.__hash__() == hash(other)
+
     @staticmethod
-    def _field_names_validation(node, values_d: dict):
-        def clear_names():
-            """ Префиксы вида 'ModelClassName.column_name'. Очистить имена столбцов от них """
-            value = {(k[k.index(".") + 1:] if "." in k else k): v for k, v in values_d.items()}
-            return value
-        return super()._field_names_validation(node, clear_names())
+    def _field_names_validation(*a, **k):
+        """ Так как данный тип нод используется в формировании результатов, отключить валидацию """
+        pass
+
+    @staticmethod
+    def _is_valid_column_type_in_sql_type(*a):
+        """ Так как данный тип нод используется в формировании результатов, отключить валидацию """
+        pass
+
+    @staticmethod
+    def _is_valid_primary_key(d: dict, model: CustomModel):
+        pass
+
+    @property
+    def retries(self):
+        return None
+
+    def make_query(self):
+        pass
 
 
 class ServiceOrmContainer(Queue):
+    """ Контейнер с композицией результата """
     LinkedListItem: Union[ServiceOrmItem, ResultORMItem] = ServiceOrmItem
 
     @property
@@ -1455,6 +1557,8 @@ class ServiceOrmContainer(Queue):
         raise DoesNotExists
 
     def __contains__(self, item: Union[ServiceOrmItem, ResultORMItem]):
+        if not isinstance(item, (ServiceOrmItem, ResultORMItem,)):
+            return False
         i = self.__iter__()
         while True:
             try:
@@ -1465,6 +1569,16 @@ class ServiceOrmContainer(Queue):
                 if node == item:
                     return True
         return False
+
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        if not len(self) == len(other):
+            return False
+        return hash(self) == hash(other)
+
+    def __hash__(self):
+        return sum(map(hash, self))
 
 
 class ConnectionManager:
@@ -1684,7 +1798,7 @@ class PrimaryKeyFactory(ModelTools):
         return node_data
 
 
-class Tool(ORMAttributes):
+class Tool(ModelTools):
     """
     Главный класс
     1) Инициализация
@@ -1746,31 +1860,50 @@ class Tool(ORMAttributes):
         model = _model or cls._model_obj
         cls.is_valid_model_instance(model)
 
-        def select_from_db():
-            if not attrs:
-                try:
-                    items_db = cls.connection.database.query(model).all()
-                except OperationalError:
-                    print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
-                          "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
-                    raise OperationalError
+        def select_from_db(items_count=None):
+            if items_count is None:
+                if not attrs:
+                    try:
+                        items_db = cls.connection.database.query(model).all()
+                    except OperationalError:
+                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
+                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
+                        raise OperationalError
+                else:
+                    try:
+                        items_db = cls.connection.database.query(model).filter_by(**attrs).all()
+                    except OperationalError:
+                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
+                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
+                        raise OperationalError
             else:
-                try:
-                    items_db = cls.connection.database.query(model).filter_by(**attrs).all()
-                except OperationalError:
-                    print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
-                          "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
-                    raise OperationalError
+                if not attrs:
+                    try:
+                        items_db = cls.connection.database.query(model).limit(items_count).all()
+                    except OperationalError:
+                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
+                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
+                        raise OperationalError
+                else:
+                    try:
+                        items_db = cls.connection.database.query(model).filter_by(**attrs).limit(items_count).all()
+                    except OperationalError:
+                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
+                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
+                        raise OperationalError
 
             def add_to_queue():
                 result = Queue()
+                result.LinkedListItem = ServiceOrmItem
                 for item in items_db:
                     col_names = model().column_names
                     result.append(**{key: item.__dict__[key] for key in col_names}, _insert=True, _model=model)
                 return result
             return add_to_queue()
 
-        def select_from_cache():
+        def select_from_cache(items_count=None):
+            if items_count is not None:
+                return cls.connection.items.search_nodes(model, **attrs)[:items_count]
             return cls.connection.items.search_nodes(model, **attrs)
         return Result(get_nodes_from_database=select_from_db, get_local_nodes=select_from_cache,
                       only_local=_queue_only, only_database=_db_only, model=model, where=attrs)
@@ -1894,16 +2027,16 @@ class Tool(ORMAttributes):
             check_transitivity_on_params()
         valid_params()
 
-        def collect_db_data():
+        def collect_db_data(items_count=None):
             def create_request() -> str:  # O(n) * O(m)
-                s = f"db.query({', '.join(map(lambda x: x.__name__, models))}).filter("  # O(l) * O(1)
+                s = f"db.query({', '.join(map(lambda x: x.__name__, models))}).filter("
                 on_keys_counter = 0
                 for left_table_dot_field, right_table_dot_field in _on.items():  # O(n)
                     s += f"{left_table_dot_field} == {right_table_dot_field}"
                     on_keys_counter += 1
                     if not on_keys_counter == len(_on):
                         s += ", "
-                s += ")"
+                s += ")" if items_count is None else f").limit({items_count})"
                 if where:
                     on_keys_counter = 0
                     s += f".filter("
@@ -1938,7 +2071,7 @@ class Tool(ORMAttributes):
                 heap += temp.search_nodes(model, **where.get(model.__name__, {}))  # O(n * k)
             return heap
 
-        def collect_local_data() -> Iterator[ServiceOrmContainer]:
+        def collect_local_data(items_count=None) -> Iterator[ServiceOrmContainer]:
             def collect_node_values(on_keys_or_values: Union[dict.keys, dict.values]):  # f(n) = O(n) * (O(k) * O(u) * (O(l) * O(m)) * O(y)); g(n) = O(n * k)
                 for node in collect_all_local_nodes():  # O(n)
                     for table_and_column in on_keys_or_values:  # O(k)
@@ -2200,7 +2333,31 @@ class ResultCacheTools(Tool):
             raise TypeError
 
 
-class BaseResult(ABC, ResultCacheTools):
+class SliceResult:
+    """ Функционал для контроля численности выборки в виде реализации среза. Мемоизация параметров среза. """
+    def __init__(self):
+        pass
+
+    def __getitem__(self, item: slice):
+        if type(item) is not slice:
+            raise TypeError
+        self.__is_valid_slice(item)
+
+    @staticmethod
+    def __is_valid_slice(self):
+        pass
+
+    def __slice(self, object_: slice):
+        """ slice применяется в качестве ограничителя количества выборки.
+         Если указан start, то он является условием. Результат окажется пустым,
+         если количество записей в результате окажется меньше, чем число, указанное на позиции start в срезе. """
+        if not object_.step == 1:
+            raise ValueError("Выборка с шагом не поддерживается, шаг всегда 1")
+        if object_.start:
+            pass
+
+
+class BaseResult(ABC, ResultCacheTools, SliceResult):
     TEMP_HASH_PREFIX: str = ...
     _merge = abstractmethod(lambda: ResultORMCollection())  # Функция, которая делает репликацию нод из кеша поверх нод из бд
     _get_node_by_joined_primary_key_and_value = abstractmethod(lambda model_pk_val_str,
@@ -2215,6 +2372,7 @@ class BaseResult(ABC, ResultCacheTools):
         self._only_db = only_database
         self._pointer: Optional["Pointer"] = None
         self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
+        self._is_slice = False
         self._is_sort = False
         self.__is_valid()
         super().__init__(self._id)
@@ -2236,6 +2394,7 @@ class BaseResult(ABC, ResultCacheTools):
             old_hash = self._get_hash()
             new_hash = set(map(str, map(hash, nodes))) - self._get_checked_hash_items()
             self._set_hash(nodes)
+            self._add_hash_to_checked([str(value) for value in map(hash, nodes)])
             if not new_hash:
                 return False
             if not new_hash == old_hash:
@@ -2294,7 +2453,9 @@ class BaseResult(ABC, ResultCacheTools):
         else:
             return True
 
-    def __getitem__(self, item: Union[str, int]):
+    def __getitem__(self, item: Union[str, int, slice]):
+        if type(item) is slice:
+            return super().__getitem__(item)
         return self.items[item]
 
     def __str__(self):
@@ -2357,7 +2518,7 @@ class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
         self._model = model
         super().__init__(*args, model=model, where=where, **kwargs)
 
-    def _merge(self):
+    def _merge(self, max_count=None):
         output = ServiceOrmContainer()
         local_items = self.get_local_nodes()
         database_items = self.get_nodes_from_database()

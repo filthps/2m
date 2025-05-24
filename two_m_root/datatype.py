@@ -90,11 +90,11 @@ class LinkedList:
     def tail(self):
         return self._tail
 
-    def append(self, *args, **kwargs):
+    def append(self, *args, node_item=None, **kwargs):
         """
         Добавить ноду в нонец
         """
-        new_element = self.LinkedListItem(*args, **kwargs)
+        new_element = self.LinkedListItem(*args, **kwargs) if node_item is None else node_item
         if len(self) == 1:
             last_elem = self._tail
             last_elem.next = new_element
@@ -109,11 +109,11 @@ class LinkedList:
         else:
             self._head = self._tail = new_element
 
-    def add_to_head(self, **kwargs):
+    def add_to_head(self, node_item=None, **kwargs):
         """
         Добавить ноду в начало
         """
-        node = self.LinkedListItem(**kwargs)
+        node = self.LinkedListItem(**kwargs) if node_item is None else node_item
         if not self:
             self._head = self._tail = node
             return
@@ -147,22 +147,24 @@ class LinkedList:
         return new_node
 
     def __getitem__(self, index):
-        index = self.__support_negative_index(index)
+        index = self._support_negative_index(index)
         self._is_valid_index(index)
         result = self.__forward_move(index)
         if result is None:
             raise IndexError
         return result
 
-    def __support_negative_index(self, index: int):
+    def _support_negative_index(self, index: int):
         if index < 0:
             index = len(self) + index
         return index
 
-    def __setitem__(self, index, value):
+    def __setitem__(self, index, value: Union[dict, LinkedListItem]):
         self._is_valid_index(index)
-        index = self.__support_negative_index(index)
-        new_element = self.LinkedListItem(**value)
+        if type(value) is not dict and type(value) is not self.LinkedListItem:
+            raise TypeError
+        index = self._support_negative_index(index)
+        new_element = self.LinkedListItem(**value) if isinstance(value, dict) else value
         if self:
             last_element = self.__forward_move(index)
             self.replace(last_element, new_element)
@@ -170,7 +172,7 @@ class LinkedList:
             self._head = self._tail = new_element
 
     def __delitem__(self, index):  # O(n)
-        index = self.__support_negative_index(index)
+        index = self._support_negative_index(index)
         self._is_valid_index(index)
         if index == self._tail.index:
             current_item = self._tail
@@ -263,7 +265,7 @@ class LinkedList:
 
     def __forward_move(self, index=-1):
         element = self._head
-        for _ in range(self.__support_negative_index(index)):
+        for _ in range(self._support_negative_index(index)):
             next_element = element.next
             if next_element is None:
                 raise IndexError
