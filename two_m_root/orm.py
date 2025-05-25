@@ -537,8 +537,8 @@ class QueueNodeSearchTool(LinkedList):
     def add_to_head(self, **kwargs):  # todo N**2
         new_item = self.LinkedListItem(**kwargs)
         super().add_to_head(node_item=new_item)
-        self.__add_node(new_item)
         self.__create_indexes()
+        self.__add_node(new_item)
 
     def replace(self, old_node, new_node):
         self.__is_valid_node(old_node)
@@ -555,45 +555,52 @@ class QueueNodeSearchTool(LinkedList):
         node_index = self._support_negative_index(node_index)
         try:
             hash_val = self.__node_index_hash_map[node_index]
-            #print(node_index, hash_val)  # Проблема в том, что все значения одинаковы!!
-            # 0 19365211018086228525341359130217813848
-            # 1 19365211018086228525341359130217813848
-            #
-            #
             return self.__items_hash_map[hash_val]
         except KeyError:
+            print(self.__node_index_hash_map)
             raise IndexError
 
     def __setitem__(self, key, value):
-        if not isinstance(value, (dict, self.LinkedListItem)):
-            raise TypeError
         new_node = value if type(value) is self.LinkedListItem else self.LinkedListItem(**value)
         self.__is_valid_node(new_node)
         super().__setitem__(key, new_node)
-        old_value = self.__node_index_hash_map.get(key, None)
-        if old_value is not None:
-            del self.__items_hash_map[old_value]
-        self.__items_hash_map[self.__get_hash_value(new_node.model.__name__,
-                                                    *new_node.get_primary_key_and_value(as_tuple=True))] = new_node
+        new_hash_value = self.__get_hash_value(new_node.model.__name__,
+                                               *new_node.get_primary_key_and_value(as_tuple=True))
+        self.__node_index_hash_map[new_node.index] = new_hash_value
+        self.__items_hash_map[new_hash_value] = new_node
         self.__create_indexes()
 
     def __delitem__(self, node_index):
-        super().__delitem__(node_index)
-        del self.__items_hash_map[self.__node_index_hash_map[node_index]]
+        node_hash = self.__node_index_hash_map[node_index]
+        node = self.__items_hash_map[node_hash]
+        del self.__items_hash_map[node_hash]
+        del self.__node_index_hash_map[node_index]
+        self.__create_indexes()
+        if node.prev and node.next:
+            node.prev().next = node.next
+            nnp = node.next.prev()
+            nnp = node.prev()
+            node.next, node.prev = None, None
+        if node.next:
+            node.next.prev = None
+            node.next = node.next.next
+        if node.prev:
+            node.prev().next = None
         self.__create_indexes()
 
     def __contains__(self, item: LinkedListItem):
-        if not isinstance(item, self.LinkedListItem):
-            return False
         try:
             self.__is_valid_node(item)
         except AttributeError:
             return False
+        except ValueError:
+            return False
         except TypeError:
             return False
-        return self.__get_hash_value(item.model.__name__, ) in self.__items_hash_map
+        return self.__get_hash_value(item.model.__name__, *item.get_primary_key_and_value(as_tuple=True)) in self.__items_hash_map
 
     def __add_node(self, new_item):
+        """ Ноде уже должен быть присвоен индекс(порядковый номер) в связанном списке, до момента вызова этого метода. """
         self.__is_valid_node(new_item)
         hash_value = self.__get_hash_value(new_item.model.__name__, *new_item.get_primary_key_and_value(as_tuple=True))
         self.__items_hash_map.update({hash_value: new_item})
@@ -603,13 +610,17 @@ class QueueNodeSearchTool(LinkedList):
         self.__node_index_hash_map = dict(zip(range(len(self)),
                                               map(lambda n: self.__get_hash_value(n.model.__name__,
                                                                                   *n.get_primary_key_and_value(as_tuple=True)), self)))
+        for i, node in enumerate(self):
+            node.index = i
 
     @staticmethod
     def __get_hash_value(*args):
         return int.from_bytes(hashlib.md5("".join(map(str, args)).encode("utf-8")).digest(), "big")
 
-    @staticmethod
-    def __is_valid_node(node):
+    @classmethod
+    def __is_valid_node(cls, node):
+        if not isinstance(node, cls.LinkedListItem):
+            raise TypeError
         if not hasattr(node, "get_primary_key_and_value"):
             raise AttributeError
         if not callable(getattr(node, "get_primary_key_and_value")):
@@ -2401,9 +2412,8 @@ class BaseResult(ABC, ResultCacheTools, SliceResult):
                 return True
             return False
         self._set_hash(nodes)
-        if self._is_hash_from_checked(hash_value):
-            return False
         if hash_value in map(str, map(hash, nodes)):
+            self._add_hash_to_checked([hash_value])
             return False
         if not self._is_node_hash_has_been_in_result(hash_value):
             return

@@ -97,8 +97,8 @@ class LinkedList:
         new_element = self.LinkedListItem(*args, **kwargs) if node_item is None else node_item
         if len(self) == 1:
             last_elem = self._tail
-            last_elem.next = new_element
-            new_element.prev = last_elem
+            self.__set_next(last_elem, new_element)
+            self.__set_prev(new_element, last_elem)
             self._tail = new_element
             return
         if self:
