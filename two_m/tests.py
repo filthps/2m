@@ -368,10 +368,10 @@ class TestToolItemQueue(unittest.TestCase):
                         "machinename": "Test", "xover": 10, "machineid": 3},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), 
-                        "machinename": "Test", "yover": 10, "machineid": 3},
+                        "machinename": "Test1", "yover": 10, "machineid": 3},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), 
-                        "machinename": "Test", "zover": 10, "machineid": 3
+                        "zover": 10, "machineid": 3
                         }]
         [queue.enqueue(**data__len_1[i]) for i in range(len(data__len_1))]
         self.assertEqual(queue.__len__(), 1)
@@ -403,7 +403,7 @@ class TestToolItemQueue(unittest.TestCase):
                         "machinename": "Test", "machineid": 3},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), 
-                        "machinename": "Test1", "machineid": 2},
+                        "machinename": "Ram", "machineid": 2},
                        {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "NewTest", "machineid": 1
@@ -422,7 +422,7 @@ class TestToolItemQueue(unittest.TestCase):
         self.assertEqual(len(data__len_3), len(queue))
         self.assertEqual(queue.dequeue().value["machinename"], "Test")
         self.assertEqual(2, queue.__len__())
-        self.assertEqual(queue.dequeue().value["machinename"], "Test1")
+        self.assertEqual(queue.dequeue().value["machinename"], "Ram")
         self.assertEqual(1, queue.__len__())
         self.assertEqual(queue.dequeue().value["machinename"], "NewTest")
         self.assertEqual(0, len(queue))
@@ -835,8 +835,14 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
         self.assertEqual(result.items[0]["Cnc"]["name"], "Ram")
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)
-        # Восстановили связь, теперь снова 2 связки в результатах
-        self.assertEqual(2, result.__len__())
+        self.assertEqual(1, result.__len__())
+        self.orm_manager.set_item(Machine, cncid=2, machineid=2, _update=True)  # Восстановили связь, теперь снова 2 связки в результатах
+        self.assertEqual(2, len(result))
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
+        self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)  # Ничего не должно измениться
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)  # Ничего не должно измениться
+        self.assertEqual(2, len(result))
         self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
         self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
         # Нарушить связь PK - FK
