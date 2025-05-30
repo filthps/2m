@@ -504,10 +504,10 @@ class ResultORMItem(LinkedListItem, NodeTools, AbsNode):
 class QueueNodeSearchTool(LinkedList):
     """ Данный класс делает поиск ноды в очереди(по первичному ключу и значению) за O(1), вместо O(n).
     Добавление ноды в конец за O(1) - вместо O(1)
-    Добавление нод в начало и середину за O(n) - вместо O(n)
+    Добавление нод по setitem O(n) - вместо O(n)
     Замена ноды за O(1) - вместо O(1)
-    Удаление ноды за O(1) - вместо O(n)
-    Поиск ноды за O(1) - вместо O(1)
+    Удаление ноды за O(n) - вместо O(n)
+    get_node ноды за O(1) - вместо O(n)
     Жертвуем O(n) памяти."""
     LinkedListItem = ...
 
@@ -517,7 +517,7 @@ class QueueNodeSearchTool(LinkedList):
         super().__init__(*args, **kwargs)
         [self.__add_node(node) for node in self]
 
-    def get_node(self, model, **primary_key_data):
+    def get_node(self, model, **primary_key_data):  # O(1)
         if not len(primary_key_data) == 1:
             raise ValueError
         try:
@@ -526,69 +526,78 @@ class QueueNodeSearchTool(LinkedList):
         except KeyError:
             return
 
-    def append(self, *args, **kwargs):
-        new_item = self.LinkedListItem(*args, **kwargs)
-        self.__is_valid_node(new_item)
-        super().append(node_item=new_item)
-        self.__add_node(new_item)
-        self.__node_index_hash_map[new_item.index] = self.__get_hash_value(new_item.model.__name__,
-                                                                           *new_item.get_primary_key_and_value(as_tuple=True))
+    def append(self, *args, **kwargs):  # O(1)
+        new_item = self.LinkedListItem(*args, **kwargs)  # O(1)
+        self.__is_valid_node(new_item)  # O(1)
+        super().append(node_item=new_item)  # O(1)
+        self.__add_node(new_item)  # O(1)
 
-    def add_to_head(self, **kwargs):  # todo N**2
-        new_item = self.LinkedListItem(**kwargs)
-        super().add_to_head(node_item=new_item)
-        self.__create_indexes()
-        self.__add_node(new_item)
+    def add_to_head(self, **kwargs):  # O(n)
+        new_item = self.LinkedListItem(**kwargs)  # O(1)
+        super().add_to_head(node_item=new_item)  # O(n)
+        self.__reset_mappings_and_indexes()  # O(n)
+        self.__add_node(new_item)  # O(1)
 
-    def replace(self, old_node, new_node):
-        self.__is_valid_node(old_node)
-        self.__is_valid_node(new_node)
-        super().replace(old_node, new_node)
+    def replace(self, old_node, new_node):  # O(1)
+        self.__is_valid_node(old_node)  # O(1)
+        self.__is_valid_node(new_node)  # O(1)
+        new_node.index = old_node.index  # O(1)
+        super().replace(old_node, new_node)  # O(1)
         hash_val = self.__get_hash_value(old_node.model.__name__,
-                                         *old_node.get_primary_key_and_value(as_tuple=True))
-        self.__items_hash_map[hash_val] = new_node
-        self.__node_index_hash_map[new_node.index] = hash_val
+                                         *old_node.get_primary_key_and_value(as_tuple=True))  # O(k)
+        self.__items_hash_map[hash_val] = new_node  # O(1)
+        self.__node_index_hash_map[new_node.index] = hash_val  # O(1)
 
-    def __getitem__(self, node_index):
+    def __getitem__(self, node_index):  # O(1)
         if not isinstance(node_index, int):
             raise TypeError
-        node_index = self._support_negative_index(node_index)
+        node_index = self._support_negative_index(node_index)  # O(1)
         try:
             hash_val = self.__node_index_hash_map[node_index]
             return self.__items_hash_map[hash_val]
         except KeyError:
-            print(self.__node_index_hash_map)
             raise IndexError
 
-    def __setitem__(self, key, value):
-        new_node = value if type(value) is self.LinkedListItem else self.LinkedListItem(**value)
-        self.__is_valid_node(new_node)
-        super().__setitem__(key, new_node)
+    def __setitem__(self, key, value):  # O(n)
+        new_node = value if type(value) is self.LinkedListItem else self.LinkedListItem(**value)  # O(1)
+        self.__is_valid_node(new_node)  # O(1)
+        super().__setitem__(key, new_node)  # O(1)
         new_hash_value = self.__get_hash_value(new_node.model.__name__,
-                                               *new_node.get_primary_key_and_value(as_tuple=True))
-        self.__node_index_hash_map[new_node.index] = new_hash_value
-        self.__items_hash_map[new_hash_value] = new_node
-        self.__create_indexes()
+                                               *new_node.get_primary_key_and_value(as_tuple=True))  # O(k)
+        self.__node_index_hash_map[new_node.index] = new_hash_value  # O(1)
+        self.__items_hash_map[new_hash_value] = new_node  # O(1)
+        self.__reset_mappings_and_indexes()  # O(n)
 
-    def __delitem__(self, node_index):
-        node_hash = self.__node_index_hash_map[node_index]
-        node = self.__items_hash_map[node_hash]
-        del self.__items_hash_map[node_hash]
-        del self.__node_index_hash_map[node_index]
-        self.__create_indexes()
-        if node.prev and node.next:
-            node.prev().next = node.next
-            nnp = node.next.prev()
-            nnp = node.prev()
-            node.next, node.prev = None, None
-        if node.next:
-            node.next.prev = None
-            node.next = node.next.next
-        if node.prev:
-            node.prev().next = None
-        self.__create_indexes()
+    def __delitem__(self, node_index):  # O(n)
+        self._is_valid_index(node_index)  # O(1)
+        node_index = self._support_negative_index(node_index)  # O(1)
+        node_hash = self.__node_index_hash_map[node_index]  # O(1)
+        node = self.__items_hash_map[node_hash]  # O(1)
+        del self.__items_hash_map[node_hash]  # O(1)
+        del self.__node_index_hash_map[node_index]  # O(1)
+        if node_index == 0:
+            next_node = node.next
+            if next_node is not None:
+                self._head = next_node
+                next_node.prev = None
+            else:
+                self._head = None
+            node.next = None
+            self.__reset_mappings_and_indexes()  # O(n)
+            return
+        if node_index == self._tail.index:
+            prev_node = node.prev()
+            prev_node.next = None
+            self._tail = prev_node
+            node.prev = None
+            return
+        next_node = node.next
+        prev_node = node.prev()
+        prev_node.next = next_node
+        next_node.prev = prev_node
+        self.__reset_mappings_and_indexes()  # O(n)
 
-    def __contains__(self, item: LinkedListItem):
+    def __contains__(self, item: LinkedListItem):  # O(1)
         try:
             self.__is_valid_node(item)
         except AttributeError:
@@ -599,19 +608,20 @@ class QueueNodeSearchTool(LinkedList):
             return False
         return self.__get_hash_value(item.model.__name__, *item.get_primary_key_and_value(as_tuple=True)) in self.__items_hash_map
 
-    def __add_node(self, new_item):
+    def __add_node(self, new_item):  # O(1)
         """ Ноде уже должен быть присвоен индекс(порядковый номер) в связанном списке, до момента вызова этого метода. """
         self.__is_valid_node(new_item)
         hash_value = self.__get_hash_value(new_item.model.__name__, *new_item.get_primary_key_and_value(as_tuple=True))
-        self.__items_hash_map.update({hash_value: new_item})
+        self.__items_hash_map[hash_value] = new_item
         self.__node_index_hash_map[new_item.index] = hash_value
 
-    def __create_indexes(self):
+    def __reset_mappings_and_indexes(self):   # O(3n)
+        for i, node in enumerate(self):
+            node.index = i
         self.__node_index_hash_map = dict(zip(range(len(self)),
                                               map(lambda n: self.__get_hash_value(n.model.__name__,
                                                                                   *n.get_primary_key_and_value(as_tuple=True)), self)))
-        for i, node in enumerate(self):
-            node.index = i
+        self.__items_hash_map = dict(zip(self.__node_index_hash_map.values(), self))
 
     @staticmethod
     def __get_hash_value(*args):
@@ -619,8 +629,6 @@ class QueueNodeSearchTool(LinkedList):
 
     @classmethod
     def __is_valid_node(cls, node):
-        if not isinstance(node, cls.LinkedListItem):
-            raise TypeError
         if not hasattr(node, "get_primary_key_and_value"):
             raise AttributeError
         if not callable(getattr(node, "get_primary_key_and_value")):
@@ -653,14 +661,14 @@ class Queue(LinkedList):
             for inner in items:
                 self.enqueue(**inner)
 
-    def enqueue(self, **attrs):
+    def enqueue(self, **attrs):  # O(n * log(n))
         """ Установка ноды в конец очереди с хитрой логикой проверки на совпадение. """
-        exists_item, new_item = self._replication(**attrs)
+        exists_item, new_item = self._replication(**attrs)  # O(1)
         self._remove_from_queue(exists_item) if exists_item is not None else None
-        self._remove_other_node_with_current_foreign_key_value(new_item)
-        self._check_primary_key_unique(new_item)
-        self._check_unique_values(new_item)
-        self.append(**new_item.get_attributes())
+        self._remove_other_node_with_current_foreign_key_value(new_item)  # O(n * log(n))
+        self._check_primary_key_unique(new_item)  # O(n)
+        self._check_unique_values(new_item)  # O(k)
+        self.append(**new_item.get_attributes())  # O(1)
 
     def dequeue(self) -> Optional[QueueItem]:
         """ Извлечение ноды с начала очереди """
@@ -762,15 +770,15 @@ class Queue(LinkedList):
     def __str__(self):
         return "\n".join(tuple(str(m) for m in self))
 
-    def __add__(self, other):
+    def __add__(self, other):  # O(n * k) = O(n)
         if type(other) is not self.__class__:
             raise TypeError
         result_instance = self.__class__()
-        [result_instance.append(**n.get_attributes()) for n in self]
-        [result_instance.enqueue(**n.get_attributes()) for n in other]
+        [result_instance.append(**n.get_attributes()) for n in self]  # O(1) * O(n)
+        [result_instance.enqueue(**n.get_attributes()) for n in other]  # O(n * log(n)) * O(k)
         return result_instance
 
-    def __iadd__(self, other):
+    def __iadd__(self, other):  # O(n)
         if not isinstance(other, type(self)):
             raise TypeError
         result = self + other
@@ -789,11 +797,14 @@ class Queue(LinkedList):
         if type(other) is not self.__class__:
             raise TypeError
         output = self.__class__()
-        for right_node in other:
-            left_node = self.get_node(right_node.model, **right_node.get_primary_key_and_value())
+        for right_node in other:  # O(k)
+            left_node = self.get_node(right_node.model, **right_node.get_primary_key_and_value())  # O(1)
             if left_node is not None:
-                output.enqueue(**left_node.get_attributes())
-                output.enqueue(**right_node.get_attributes())
+                data = left_node.get_attributes()
+                data.update(right_node.get_attributes())
+                output.append(**data)
+            else:
+                output.append(**right_node.get_attributes())
         return output
 
     def _replication(self, **new_node_complete_data: dict) -> tuple[Optional[QueueItem], QueueItem]:  # O(l * k) + O(n) + O(1) = O(n)
@@ -818,7 +829,7 @@ class Queue(LinkedList):
             new_node_data.update({dml_type: True, "_ready": new_node.ready})
             new_node_data.update({"_create_at": new_node.created_at})
             return self.LinkedListItem(**new_node_data)
-        exists_item = self.get_node(potential_new_item.model, **potential_new_item.get_primary_key_and_value())  # O(n)
+        exists_item = self.get_node(potential_new_item.model, **potential_new_item.get_primary_key_and_value())
         if not exists_item:
             new_item = potential_new_item
             return None, new_item
@@ -1567,20 +1578,6 @@ class ServiceOrmContainer(Queue):
             return nodes[0]
         raise DoesNotExists
 
-    def __contains__(self, item: Union[ServiceOrmItem, ResultORMItem]):
-        if not isinstance(item, (ServiceOrmItem, ResultORMItem,)):
-            return False
-        i = self.__iter__()
-        while True:
-            try:
-                node = next(i)
-            except StopIteration:
-                break
-            else:
-                if node == item:
-                    return True
-        return False
-
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
             return False
@@ -2317,6 +2314,13 @@ class ResultCacheTools(Tool):
     def _get_checked_hash_items(self):
         return self.connection.cache.get(f"{self.__key}-checked", set())
 
+    def _remove_hash_from_checked(self, val):
+        checked = self._get_checked_hash_items()
+        if val not in checked:
+            return
+        checked.remove(val)
+        self.connection.cache.set(f"{self.__key}-checked", checked)
+
     def _set_primary_keys(self, nodes):
         self.__is_valid_nodes(nodes)
         self.connection.cache.set(f"{self.__key}-pk", set(map(str, map(lambda x: x.hash_by_pk, nodes))))
@@ -2405,7 +2409,6 @@ class BaseResult(ABC, ResultCacheTools, SliceResult):
             old_hash = self._get_hash()
             new_hash = set(map(str, map(hash, nodes))) - self._get_checked_hash_items()
             self._set_hash(nodes)
-            self._add_hash_to_checked([str(value) for value in map(hash, nodes)])
             if not new_hash:
                 return False
             if not new_hash == old_hash:
@@ -2413,10 +2416,18 @@ class BaseResult(ABC, ResultCacheTools, SliceResult):
             return False
         self._set_hash(nodes)
         if hash_value in map(str, map(hash, nodes)):
-            self._add_hash_to_checked([hash_value])
             return False
         if not self._is_node_hash_has_been_in_result(hash_value):
             return
+        if hash_value in self._get_primary_keys_hash():
+            if hash_value not in [node.hash_by_pk for node in nodes]:
+                return True
+            if nodes[hash_value] not in self._get_hash():
+                return True
+            return False
+        if hash_value in self._get_checked_hash_items():
+            self._remove_hash_from_checked(hash_value)
+            return False
         self._add_hash_to_checked([hash_value])
         return True
 

@@ -41,9 +41,9 @@ class LinkedListItem:
 
     @prev.setter
     def prev(self, item: Optional["LinkedListItem"]):
-        self._is_valid_item(item)
-        if not item:
+        if item is None:
             return
+        self._is_valid_item(item)
         self.__prev = ref(item)
         if not self._index:
             item.index = 0
@@ -95,12 +95,6 @@ class LinkedList:
         Добавить ноду в нонец
         """
         new_element = self.LinkedListItem(*args, **kwargs) if node_item is None else node_item
-        if len(self) == 1:
-            last_elem = self._tail
-            self.__set_next(last_elem, new_element)
-            self.__set_prev(new_element, last_elem)
-            self._tail = new_element
-            return
         if self:
             last_elem = self._tail
             self.__set_next(last_elem, new_element)
@@ -109,11 +103,11 @@ class LinkedList:
         else:
             self._head = self._tail = new_element
 
-    def add_to_head(self, node_item=None, **kwargs):
+    def add_to_head(self, **kwargs):
         """
         Добавить ноду в начало
         """
-        node = self.LinkedListItem(**kwargs) if node_item is None else node_item
+        node = self.LinkedListItem(**kwargs)
         if not self:
             self._head = self._tail = node
             return
@@ -131,14 +125,14 @@ class LinkedList:
     def replace(self, old_node: LinkedListItem, new_node: LinkedListItem):
         if not isinstance(old_node, self.LinkedListItem) or not isinstance(new_node, self.LinkedListItem):
             raise TypeError
-        if not len(self):
+        if not self:
             return
-        if len(self) == 1:
+        if self._head.index == self._tail.index:
             self._head = self._tail = new_node
             return
         next_node = old_node.next
         previous_node = old_node.prev
-        if old_node.index == len(self) - 1:
+        if old_node.index == self._tail.index:
             self._tail = new_node
         if old_node.index == 0:
             self._head = new_node
@@ -156,15 +150,15 @@ class LinkedList:
 
     def _support_negative_index(self, index: int):
         if index < 0:
-            index = len(self) + index
+            if self._tail is None:
+                return index
+            index = self._tail.index + 1 + index
         return index
 
-    def __setitem__(self, index, value: Union[dict, LinkedListItem]):
+    def __setitem__(self, index, value):
         self._is_valid_index(index)
-        if type(value) is not dict and type(value) is not self.LinkedListItem:
-            raise TypeError
         index = self._support_negative_index(index)
-        new_element = self.LinkedListItem(**value) if isinstance(value, dict) else value
+        new_element = self.LinkedListItem(**value)
         if self:
             last_element = self.__forward_move(index)
             self.replace(last_element, new_element)
