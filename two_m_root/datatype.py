@@ -1,6 +1,7 @@
 import weakref
 import copy
 from weakref import ref
+from itertools import zip_longest
 from typing import Optional, Iterable, Union, Any, Iterator
 
 
@@ -10,6 +11,9 @@ class LinkedListItem:
         self._index = 0
         self.__next = None
         self.__prev = None
+
+    def get_attributes(self):
+        return self.value
 
     @property
     def next(self):
@@ -63,7 +67,12 @@ class LinkedListItem:
             raise TypeError
 
     def __eq__(self, other: "LinkedListItem"):
-        self._is_valid_item(other)
+        if other is None:
+            return False
+        try:
+            self._is_valid_item(other)
+        except TypeError:
+            return False
         return self._val == other.value
 
     def __repr__(self):
@@ -141,19 +150,15 @@ class LinkedList:
         return new_node
 
     def __getitem__(self, index):
+        if type(index) is slice:
+            self._is_valid_slice(index)
+            return self._get_slice(index)
         index = self._support_negative_index(index)
         self._is_valid_index(index)
         result = self.__forward_move(index)
         if result is None:
             raise IndexError
         return result
-
-    def _support_negative_index(self, index: int):
-        if index < 0:
-            if self._tail is None:
-                return index
-            index = self._tail.index + 1 + index
-        return index
 
     def __setitem__(self, index, value):
         self._is_valid_index(index)
@@ -206,15 +211,6 @@ class LinkedList:
     def __str__(self):
         return str([str(x) for x in self])
 
-    def _replace_inner(self, new_head: LinkedListItem, new_tail: LinkedListItem):
-        """
-        Заменить значения инкапсулированных атрибутов head и tail на новые
-        """
-        if type(new_head) is not self.LinkedListItem or type(new_tail) is not self.LinkedListItem:
-            raise TypeError
-        self._head = new_head
-        self._tail = new_tail
-
     def __len__(self):
         return sum((1 for _ in self))
 
@@ -235,6 +231,70 @@ class LinkedList:
             if node == item:
                 return True
         return False
+
+    def __eq__(self, other):
+        if type(other) is not self.__class__:
+            return False
+        return all(map(lambda x: x[0] == x[1], zip_longest(self, other)))
+
+    def _is_valid_slice(self, slice_: slice):
+        if slice_.step is not None:
+            raise ValueError("Шаг не поддерживается. В этом нету необходимости.")
+        if slice_.stop == float("inf") and slice_.start == 0:
+            return
+        start = slice_.start if slice_.start is not None else 0
+        stop = slice_.stop if slice_.stop is not None else self._tail.index
+        if type(start) is not int:
+            raise TypeError
+        if not isinstance(stop, int):
+            raise TypeError
+        if start < 0:
+            start = self._support_negative_index(start)
+        if stop < 0:
+            stop = self._support_negative_index(stop)
+        if stop < start:
+            raise IndexError
+        if start < self._head.index:
+            raise IndexError
+        if stop < self._head.index:
+            raise IndexError
+        if stop > self._tail.index:
+            raise IndexError
+
+    def _get_slice(self, item: slice) -> "LinkedList":
+        self._is_valid_slice(item)
+        left = self._support_negative_index(item.start if item.start is not None else 0)
+        right = self._support_negative_index(item.stop if item.stop is not None and not item.stop == float("inf")
+                                             else self._tail.index)
+        if item.stop is not None:
+            if not item.stop == 0:
+                right += 1
+        if item.stop is None:
+            right += 1
+        elem = self.__forward_move(left)
+        counter = left
+        instance = self.__class__()
+        while counter < right:
+            instance.append(**elem.get_attributes())
+            counter += 1
+            elem = elem.next
+        return instance
+
+    def _support_negative_index(self, index: int):
+        if index < 0:
+            if self._tail is None:
+                return index
+            index = self._tail.index + 1 + index
+        return index
+
+    def _replace_inner(self, new_head: LinkedListItem, new_tail: LinkedListItem):
+        """
+        Заменить значения инкапсулированных атрибутов head и tail на новые
+        """
+        if type(new_head) is not self.LinkedListItem or type(new_tail) is not self.LinkedListItem:
+            raise TypeError
+        self._head = new_head
+        self._tail = new_tail
 
     def _is_valid_index(self, index):
         if not isinstance(index, int):
