@@ -136,6 +136,51 @@ class TestLinkedList(unittest.TestCase):
             linked_list[False]
             linked_list[True]
 
+    def test_getitem_slice(self):
+        linked_list = LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3},
+                                  {"node3_val": 4}, {"node4_val": 5}])
+        self.assertEqual(len(linked_list[:-2]), LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3}, {"node3_val": 4}]).__len__())
+        self.assertEqual(linked_list[:-2], LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3}, {"node3_val": 4}]))
+        self.assertEqual(linked_list[:-2], LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3}, {"node3_val": 4}]))
+        self.assertEqual(linked_list[:2], linked_list[:-3])
+        self.assertEqual(linked_list[:3], linked_list[:-2])
+        self.assertEqual(linked_list[:1], linked_list[:1])
+        self.assertEqual(linked_list[:-2], linked_list[:-2])
+        self.assertEqual(linked_list[1:3], linked_list[1:-2])
+        self.assertEqual(linked_list[:], linked_list)
+        linked_list[0:float("inf")]
+        with self.assertRaises(IndexError):
+            linked_list[5:5]
+            linked_list[5:]
+            linked_list[:6]
+            linked_list[6:]
+            linked_list[:-5]
+            linked_list[-5:]
+            linked_list[10:]
+            linked_list[99:]
+            linked_list[-11:]
+            linked_list[10:]
+            linked_list[-99:]
+            linked_list[11:]
+            linked_list[10:]
+            linked_list[99:]
+            linked_list[-0:]
+        with self.assertRaises(TypeError):
+            linked_list[float(10):]
+            linked_list[float("inf"):]
+            linked_list["3":]
+            linked_list["0":]
+            linked_list[:"7"]
+            linked_list[[]:]
+            linked_list[["4"]:]
+            linked_list[:5.7]
+            linked_list[[None]:]
+            linked_list[None:]
+            linked_list[:[None]]
+            linked_list[[2]:]
+            linked_list[:0]
+            linked_list[[None]:2]
+
     def test_setitem(self):
         linked_list = LinkedList()
         self.assertEqual(linked_list.__len__(), 0)
@@ -1058,93 +1103,107 @@ class TestResultPointer(unittest.TestCase, SetUp):
         self.assertRaises(KeyError, result.pointer.has_changes, "Другой не установленный во wrapper элемент")
         self.assertFalse(result.pointer.has_changes("Результат в списке 1"))
 
-"""  not supported - ver 1.
-class TestQueueOrderBy(unittest.TestCase, SetUp):
+
+class TestSliceMixin(unittest.TestCase, SetUp):
     def setUp(self) -> None:
         Tool.CACHE_LIFETIME_HOURS = 60
         self.orm_manager = Tool()
 
-    @db_reinit
-    @drop_cache
-    def test_order_by_field__alphabet(self):
-        self.set_data_into_database()
-        self.set_data_into_queue()
-        result = self.orm_manager.get_items(Machine)
-        # Передача правильных параметров
-        result.order_by(by_create_time=True, alphabet=True)
-        result.order_by(by_column_name="machinename", length=True)
-        result.order_by(by_primary_key=True, alphabet=True)
-        result.order_by(by_create_time=True, decr=True, alphabet=True)
-        result.order_by(by_column_name="machinename", decr=True, length=True)
-        result.order_by(by_primary_key=True, decr=True, length=True)
-        result.order_by(by_create_time=True, decr=False, length=True)
-        result.order_by(by_column_name="machinename", decr=False, alphabet=True)
-        result.order_by(by_primary_key=True, decr=False, length=True)
-        # Передача неправильных параметров
-        self.assertRaises(ValueError, result.order_by)
-        self.assertRaises(TypeError, result.order_by, by_create_time=4)
-        self.assertRaises(TypeError, result.order_by, by_create_time="strf")
-        self.assertRaises(ValueError, result.order_by, by_create_time=None)
-        self.assertRaises(TypeError, result.order_by, by_create_time=8.9)
-        self.assertRaises(TypeError, result.order_by, by_create_time=datetime.datetime.now())
-        self.assertRaises(TypeError, result.order_by, by_create_time=b"0x43")
-        self.assertRaises(TypeError, result.order_by, by_create_time=0)
-        self.assertRaises(TypeError, result.order_by, by_primary_key=4)
-        self.assertRaises(TypeError, result.order_by, by_primary_key="strf")
-        self.assertRaises(ValueError, result.order_by, by_primary_key=None)
-        self.assertRaises(TypeError, result.order_by, by_primary_key=8.9)
-        self.assertRaises(TypeError, result.order_by, by_primary_key=datetime.datetime.now())
-        self.assertRaises(TypeError, result.order_by, by_primary_key=b"0x43")
-        self.assertRaises(TypeError, result.order_by, by_primary_key=0)
-        self.assertRaises(TypeError, result.order_by, by_column_name=4)
-        self.assertRaises(TypeError, result.order_by, by_column_name=True)
-        self.assertRaises(TypeError, result.order_by, by_column_name=False)
-        self.assertRaises(ValueError, result.order_by, by_column_name=None)
-        self.assertRaises(TypeError, result.order_by, by_column_name=8.9)
-        self.assertRaises(TypeError, result.order_by, by_column_name=datetime.datetime.now())
-        self.assertRaises(TypeError, result.order_by, by_column_name=b"0x43")
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr=4)
-        self.assertRaises(TypeError, result.order_by, by_create_time=True, decr=None)
-        self.assertRaises(TypeError, result.order_by, by_primary_key=True, decr=6.8)
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr="teststr")
-        self.assertRaises(ValueError, result.order_by, by_column_name="machinename", decr=True)
-        self.assertRaises(ValueError, result.order_by, by_column_name="machinename", decr=True, length=True, alphabet=True)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, length="123", alphabet=True)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, length=True, alphabet=3)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, length=True, alphabet=None)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, length=True, alphabet=9.7)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, length=True, alphabet=0)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, length=0, alphabet=0)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, alphabet="123", length=True)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, alphabet=True, length=3)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, alphabet=True, length=None)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, alphabet=True, length=9.7)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, alphabet=True, length=0)
-        self.assertRaises((TypeError, ValueError), result.order_by, by_column_name="machinename", decr=True, alphabet=0, length=0)
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr=True, length="123")
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr=True, alphabet=0)
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr=True, alphabet=None)
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr=True, alphabet=6)
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr=True, alphabet=0.7)
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr=True, alphabet=b'')
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr=True, alphabet=b'0x3')
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr=True, alphabet=[])
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr=True, alphabet=tuple())
-        self.assertRaises(TypeError, result.order_by, by_column_name="machinename", decr=True, alphabet=object())
-        #
-        # Проверка соответствия результатов
-        #
-        # Сортировка по алфавиту  todo
-        ...
-
-        # Сортировка по длине строки значения todo
-
     @drop_cache
     @db_reinit
-    def test_order_by_time(self):
+    def test_slice(self):
         self.set_data_into_database()
         self.set_data_into_queue()
-        container = self.orm_manager.connection.items
-        container.order_by(Machine, by_create_time=True)
-        print(container.search_nodes(Machine))
-"""
+        result_obj = self.orm_manager.get_items(_model=Machine)
+        result_obj[:1]
+        print(len(result_obj))
+
+
+class TestLettersSort(unittest.TestCase, SetUp):
+    def setUp(self) -> None:
+        data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(),
+                 "machinename": "Test", "machineid": 1},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(),
+                 "machinename": "Name", "machineid": 4},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(),
+                 "machinename": "NewTest", "machineid": 2
+                 }, {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                  "_delete": False, "_create_at": datetime.datetime.now(),
+                  "machinename": "Test4", "machineid": 3},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(),
+                 "machinename": "Amacgdfg", "machineid": 8},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(),
+                 "machinename": "ZName", "machineid": 419}]
+        container = ServiceOrmContainer(data)
+        self.test_result_collection = ResultORMCollection(container)
+
+    def test_original_ordering(self):
+        """ Убедимся, что ноды расположены в исходном порядке,- в том, в котором они были переданы при инициализации.
+        Убедимся, что наш контейнер не перевирает очерёдность."""
+        machine_names = ["Test", "Name", "NewTest", "Test4"]
+        self.assertEqual([i["machinename"] for i in self.test_result_collection], machine_names)
+        machine_id = [1, 4, 2, 3]
+        self.assertEqual(list(map(lambda x: x["machineid"], self.test_result_collection)), machine_id)
+
+    def test_sort_single_init(self):
+        _ = LettersSort("machinename", nodes=self.test_result_collection)
+
+    def test_receive_invalid_instance(self):
+        with self.assertRaises(TypeError):
+            LettersSort("field_name", nodes=Queue())
+            LettersSort("field_name", nodes=object())
+            LettersSort("field_name", nodes=Queue())
+            LettersSort("field_name", nodes=12)
+            LettersSort("field_name", nodes=[1,2,5])
+            LettersSort(4, nodes=Queue())
+            LettersSort(Queue(), nodes=Queue())
+            LettersSort(ResultORMCollection(), nodes=Queue())
+            LettersSort(4, nodes=self.test_result_collection)
+            LettersSort(["stry", "gd"], nodes=self.test_result_collection)
+            LettersSort(["stry"], nodes=self.test_result_collection)
+            LettersSort("field", nodes_group_chain=ResultORMCollection())
+            LettersSort(4, nodes_group_chain=ResultORMCollection())
+            LettersSort("field", nodes_group_chain=45)
+            LettersSort("field", nodes_group_chain="34535")
+        with self.assertRaises(ValueError):
+            LettersSort("", nodes=ResultORMCollection())
+
+    def test_original_ordering_is_rand(self):
+        """ Убедимся, что исходное расположение не является верным ни для одного из вариантов сортировки,
+         дабы избежать совпадения. """
+        id_ = sorted([1, 4, 2, 3, 8, 419])
+        id_decr = sorted(id_, reverse=True)
+        lengths = [node["machinename"].__len__() for node in self.test_result_collection]
+        self.assertNotEqual(lengths, sorted(lengths))
+        self.assertNotEqual(lengths, sorted(lengths, reverse=True))
+        self.assertNotEqual([node["machineid"] for node in self.test_result_collection], id_)
+        self.assertNotEqual([node["machineid"] for node in self.test_result_collection], id_decr)
+        machine_names_sorted = ['Amacgdfg', 'Name', 'NewTest', 'Test', 'Test4', 'ZName']
+        machine_names_sorted_reversed = sorted(machine_names_sorted, reverse=True)
+        self.assertNotEqual([node["machinename"] for node in self.test_result_collection], machine_names_sorted)
+        self.assertNotEqual([node["machinename"] for node in self.test_result_collection], machine_names_sorted_reversed)
+
+    def test_sort_by_field_decr(self):
+        """ Тестировать сортировку по столбцу со строкой, на убывание.
+        Сортировка производится по первой букве, согласно алфовитному порядку. """
+        sorted_items = LettersSort("machinename", self.test_result_collection, decr=True)
+        sorted_collection = sorted_items.sort_by_alphabet()
+        self.assertEqual(['Amacgdfg', 'Name', 'NewTest', 'Test', 'Test4', 'ZName'],
+                         [node["machinename"] for node in sorted_collection])
+
+    def test_sort_by_field_incr(self):
+        """ Тестировать сортировку по столбцу со строкой, на убывание.
+        Сортировка производится по первой букве, согласно алфовитному порядку. """
+        sorted_items = LettersSort("machinename", self.test_result_collection, decr=False)
+        sorted_collection = sorted_items.sort_by_alphabet()
+        self.assertEqual(['ZName', 'Test', 'Test4', 'Name', 'NewTest', 'Amacgdfg'],
+                         [node["machinename"] for node in sorted_collection])
+
+    def test_sort_by_string_length(self):
+        sorted_items = LettersSort("machinename", self.test_result_collection, decr=False)
+        sorted_collection = sorted_items.sort_by_string_length()
