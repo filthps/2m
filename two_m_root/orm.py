@@ -526,8 +526,8 @@ class QueueNodeSearchTool(LinkedList):
         except KeyError:
             return
 
-    def append(self, *args, **kwargs):  # O(1)
-        new_item = self.LinkedListItem(*args, **kwargs)  # O(1)
+    def append(self, *args, node_item=None, **kwargs):  # O(1)
+        new_item = self.LinkedListItem(*args, **kwargs) if node_item is None else node_item  # O(1)
         self.__is_valid_node(new_item)  # O(1)
         super().append(node_item=new_item)  # O(1)
         self.__add_node(new_item)  # O(1)
@@ -549,8 +549,10 @@ class QueueNodeSearchTool(LinkedList):
         self.__node_index_hash_map[new_node.index] = hash_val  # O(1)
 
     def __getitem__(self, node_index):  # O(1)
-        if not isinstance(node_index, int):
+        if not isinstance(node_index, (int, slice,)):
             raise TypeError
+        if type(node_index) is slice:
+            return super().__getitem__(node_index)
         node_index = self._support_negative_index(node_index)  # O(1)
         try:
             hash_val = self.__node_index_hash_map[node_index]
@@ -644,6 +646,11 @@ class QueueNodeSearchTool(LinkedList):
         if not hasattr(node, "model"):
             raise AttributeError
         ModelTools.is_valid_model_instance(node.model)
+
+    def __get_slice(self, obj: slice):
+        if not isinstance(obj, slice):
+            raise TypeError
+
 
 
 class Queue(LinkedList):
@@ -1084,29 +1091,37 @@ class ResultORMCollection:
 
 
 class Sort:
-    def __init__(self, container):
-        self._reverse = False
-        self._field = None
-        self.__container = container
+    def __init__(self, field_name, container_cls, reverse=False):
+        self._reverse = reverse
+        self._field = field_name
+        self.__container_cls = container_cls
 
     def _create_mapping(self) -> dict[str, Type[LinkedList]]:
         """  Заполнить словарь ключами """
-        keys = map(lambda x: (x.upper(), x,), string.ascii_lowercase)
-        return {key: type(self.__container)() for key in keys}
+        pattern = string.ascii_lowercase
+        if self._reverse:
+            pattern = list(pattern)
+            pattern.reverse()
+            pattern = "".join(pattern)
+        keys = map(lambda x: (x.upper(), x,), pattern)
+        return {key: self.__container_cls() for key in keys}
 
     @staticmethod
     def _fill_mapping(data, nodes, target_column_name):
         for item in nodes:
             p = item.value[target_column_name][0]
-            data[(p.upper(), p,)].append(**item.get_attributes())
+            data[(p.upper(), p.lower(),)].append(**item.get_attributes())
 
 
 class LettersSortSingleNodes(Sort):
-    def __init__(self, nodes: ResultORMCollection):
-        super().__init__(nodes)
+    def __init__(self, field_name: str, nodes: ResultORMCollection, reverse: bool):
+        super(LettersSortNodesChain, self).__init__(field_name, nodes.container_cls, reverse)
         self._input_nodes = nodes
         if not isinstance(nodes, ResultORMCollection):
             raise TypeError
+        if type(reverse) is not bool:
+            raise TypeError
+        self._reverse = reverse
         self._nodes_in_sort = None  # Ноды, которые принимают участие в сортировке
         self._other_items = None  # Ноды, которые не участвуют в сортировке (доб в конец)
 
@@ -1126,16 +1141,18 @@ class LettersSortSingleNodes(Sort):
         def create_mapping(nodes):
             """ Создать словарь, где ключи - длина """
             return {len(node.value[self._field]): node for node in nodes}
-
         self._slice_other_nodes()
         self._select_nodes_to_sort()
+        output = self._input_nodes.container_cls()
         mapping = create_mapping(self._nodes_in_sort)
         mapping = dict(sorted(mapping.items(), key=lambda x: x[0]))
-        return self._merge_mapping(mapping) + self._other_items
+        [print(node) for node in mapping.values()]
+        return ResultORMCollection(output + self._other_items)
 
     def _select_nodes_to_sort(self):
         """ Вернуть ноды, которые будут участвовать в сортировке """
-        self._nodes_in_sort = self._input_nodes.container_cls.__class__()
+        self._input_nodes.container_cls.LinkedListItem = ServiceOrmItem
+        self._nodes_in_sort = self._input_nodes.container_cls()
         for node in self._input_nodes:
             if self._field in node.value:
                 self._nodes_in_sort.append(**node.get_attributes())
@@ -1144,27 +1161,30 @@ class LettersSortSingleNodes(Sort):
         """ Вырезать из коллекции ноды, ключевые поля у которых не заполнены.
         Не изменять исходную коллекцию. Присвоить в self._other_items.
         В дальнейшем их планируется добавить в конец сортированной коллекции """
-        self._other_items = self._input_nodes.container_cls.__class__()
+        self._other_items = self._input_nodes.container_cls()
         for node in self._input_nodes:
             if self._field not in node.value:
                 self._other_items.append(**node.get_attributes())
 
     def _merge_mapping(self, data):
         """ Словарь, который отсортирован, - 'сжать' его значения воедино, сохраняя последовательность """
-        output = self._input_nodes.container_cls.__class__()
+        output = self._input_nodes.container_cls()
         for val in data.values():
-            output.append(val)
+            output += val
         return output
 
 
 class LettersSortNodesChain(Sort):
-    def __init__(self, group: list[ResultORMCollection]):
-        super().__init__(group[0] if group else None)
-        self._nodes_chain = group
+    def __init__(self, field_name: str, group: list[ResultORMCollection], reverse: bool):
+        super().__init__(field_name, group[0] if group else None, not reverse)
         if type(group) is not list:
             raise TypeError
         if any(map(lambda x: type(x) is not ResultORMCollection, group)):
             raise TypeError
+        if not isinstance(reverse, bool):
+            raise TypeError
+        self._reverse = reverse
+        self._nodes_chain = group
 
     def sort_by_alphabet(self):
         """ 1) Свалить все ноды в кучу
@@ -1243,47 +1263,51 @@ class LettersSort(LettersSortSingleNodes, LettersSortNodesChain):
      Простейшая сортировка при помощи встроенной функции sorted. """
     def __init__(self, field_name, nodes: ResultORMCollection = None,
                  nodes_group_chain: list[ResultORMCollection] = None, decr=True):
-        self._nodes_chain = nodes_group_chain
-        self._input_nodes = nodes
-        self._reverse = decr
-        self._field = field_name
         if nodes is not None:
-            super(LettersSortSingleNodes, self).__init__(nodes)
+            super().__init__(field_name, nodes, not decr)
         if nodes_group_chain is not None:
-            super(LettersSortNodesChain, self).__init__(nodes_group_chain)
+            super(LettersSortSingleNodes, self).__init__(field_name, nodes_group_chain, not decr)
         if not sum((bool(nodes), bool(nodes_group_chain),)) == 1:
             raise ValueError
-        if type(self._reverse) is not bool:
+        if type(decr) is not bool:
             raise TypeError
-        if not isinstance(self._field, str):
+        if not isinstance(field_name, str):
             raise TypeError
-        if not self._field:
+        if not field_name:
             raise ValueError("Данная строка не может быть пустой")
+        self.__is_single_nodes = False if nodes is None else True
 
     def sort_by_alphabet(self):
-        return super().sort_by_alphabet() \
-            if self._nodes_chain else \
-            super(LettersSortNodesChain, self).sort_by_alphabet()
+        return super(LettersSortSingleNodes, self).sort_by_alphabet() \
+            if not self.__is_single_nodes else \
+            super().sort_by_alphabet()
 
     def sort_by_string_length(self):
-        return super().sort_by_string_length() \
-            if self._nodes_chain else \
-            super(LettersSortNodesChain, self).sort_by_string_length()
+        return super(LettersSortSingleNodes, self).sort_by_string_length() \
+            if not self.__is_single_nodes else \
+            super().sort_by_string_length()
 
 
 class OrderByMixin(ABC):
     """ Реализация функционала для сортировки экземпляров ResultORMCollection в виде примеси для класса Result* """
-    items = abstractproperty(lambda: ...)
-    _merge = abstractmethod(lambda: ...)
-    __iter__ = abstractmethod(lambda: ...)
 
     def __init__(self: Union["Result", "JoinSelectResult"], *args, **kwargs):
+        def is_valid():
+            if not hasattr(self, "_get_local_nodes"):
+                raise AttributeError
+            if not hasattr(self, "_get_nodes_from_database"):
+                raise AttributeError
+            if not callable(self.get_local_nodes):
+                raise TypeError
+            if not callable(self.get_nodes_from_database):
+                raise AttributeError
         if not isinstance(self, (Result, JoinSelectResult)):
             raise TypeError("Использовать данный класс в наследовании! Как миксин")
         super().__init__(*args, **kwargs)
         self._order_by_args = None
         self._order_by_kwargs = None
         self._is_sort = False
+        is_valid()
 
     def order_by(self, *args, **kwargs):
         """ Включить сортировку для экземпляра целевого класса и запомнить аргументы """
@@ -1292,16 +1316,15 @@ class OrderByMixin(ABC):
         self._is_sort = True
         self.__is_valid_order_by_params(*args, **kwargs)
 
-    @property
-    def items(self) -> Union[list["ResultORMCollection"], "ResultORMCollection"]:
-        if not self._is_sort:
-            return super().items
-        return self._order_by(super().items)
+    def get_nodes_from_database(self, **kwargs):
+        if hasattr(super(), "get_nodes_from_database"):
+            return super().get_nodes_from_database(**kwargs)
+        return self._get_nodes_from_database(**kwargs)
 
-    def __iter__(self):
-        if not self._is_sort:
-            return super().__iter__()
-        return iter(self.items)
+    def get_local_nodes(self, **kwargs):
+        if hasattr(super(), "get_local_nodes"):
+            return super().get_local_nodes(**kwargs)
+        return self._get_local_nodes(**kwargs)
 
     @abstractmethod
     def _order_by(self, nodes: Union["ResultORMCollection", tuple["ResultORMCollection"]]) -> \
@@ -1531,6 +1554,11 @@ class ServiceOrmItem(QueueItem, AbsNode):
         if type(other) is not type(self):
             return False
         return self.__hash__() == hash(other)
+
+    @staticmethod
+    def _is_valid_dml_type(*a, **k):
+        """ Валидация типа ноды в рамках DML(SQL). Отключить валидацию """
+        pass
 
     @staticmethod
     def _field_names_validation(*a, **k):
@@ -1868,37 +1896,21 @@ class Tool(ModelTools):
         model = _model or cls._model_obj
         cls.is_valid_model_instance(model)
 
-        def select_from_db(items_count=None):
-            if items_count is None:
-                if not attrs:
-                    try:
-                        items_db = cls.connection.database.query(model).all()
-                    except OperationalError:
-                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
-                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
-                        raise OperationalError
-                else:
-                    try:
-                        items_db = cls.connection.database.query(model).filter_by(**attrs).all()
-                    except OperationalError:
-                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
-                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
-                        raise OperationalError
+        def select_from_db(offset=None, limit=None):
+            if not attrs:
+                try:
+                    items_db = cls.connection.database.query(model).offset(offset).limit(limit).all()
+                except OperationalError:
+                    print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
+                          "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
+                    raise OperationalError
             else:
-                if not attrs:
-                    try:
-                        items_db = cls.connection.database.query(model).limit(items_count).all()
-                    except OperationalError:
-                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
-                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
-                        raise OperationalError
-                else:
-                    try:
-                        items_db = cls.connection.database.query(model).filter_by(**attrs).limit(items_count).all()
-                    except OperationalError:
-                        print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
-                              "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
-                        raise OperationalError
+                try:
+                    items_db = cls.connection.database.query(model).filter_by(**attrs).offset(offset).limit(limit).all()
+                except OperationalError:
+                    print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
+                          "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
+                    raise OperationalError
 
             def add_to_queue():
                 result = Queue()
@@ -1909,10 +1921,8 @@ class Tool(ModelTools):
                 return result
             return add_to_queue()
 
-        def select_from_cache(items_count=None):
-            if items_count is not None:
-                return cls.connection.items.search_nodes(model, **attrs)[:items_count]
-            return cls.connection.items.search_nodes(model, **attrs)
+        def select_from_cache(left_border=0, right_border=float("inf")):
+            return cls.connection.items.search_nodes(model, **attrs)[left_border:right_border]
         return Result(get_nodes_from_database=select_from_db, get_local_nodes=select_from_cache,
                       only_local=_queue_only, only_database=_db_only, model=model, where=attrs)
 
@@ -2267,6 +2277,7 @@ class ResultCacheTools(Tool):
     __iter__ = abstractmethod(lambda self: ...)
 
     def __init__(self, id_: int, *args, **kw):
+        super().__init__()
         if not issubclass(type(self), BaseResult):
             raise TypeError
         if type(id_) is not int:
@@ -2349,27 +2360,64 @@ class ResultCacheTools(Tool):
 
 
 class SliceResult:
-    """ Функционал для контроля численности выборки в виде реализации среза. Мемоизация параметров среза. """
-    def __init__(self):
-        pass
+    """ Функционал для контроля численности выборки в виде реализации среза. Мемоизация параметров среза."""
+    def __init__(self: Union["SliceResult", "BaseResult"]):
+        if not issubclass(self.__class__, BaseResult):
+            raise Exception
+
+        def is_valid():
+            if not hasattr(self, "_get_local_nodes"):
+                raise AttributeError
+            if not hasattr(self, "_get_nodes_from_database"):
+                raise AttributeError
+            if not callable(self.get_local_nodes):
+                raise TypeError
+            if not callable(self.get_nodes_from_database):
+                raise AttributeError
+        self._is_slice = False
+        self.__left_border = None
+        self.__right_border = None
+        is_valid()
 
     def __getitem__(self, item: slice):
         if type(item) is not slice:
             raise TypeError
         self.__is_valid_slice(item)
+        self.__left_border = item.start
+        self.__right_border = item.stop
+        self._is_slice = True
+
+    def get_nodes_from_database(self, **kwargs):
+        if hasattr(super(), "get_nodes_from_database"):
+            items = super().get_nodes_from_database(offset=self.__left_border,
+                                                    limit=self.__right_border, **kwargs)
+        else:
+            items = self._get_nodes_from_database(offset=self.__left_border,
+                                                  limit=self.__right_border, **kwargs)
+        return items
+
+    def get_local_nodes(self, **kwargs):
+        if hasattr(super(), "get_local_nodes"):
+            items = super().get_local_nodes(left_border=self.__left_border,
+                                            right_border=self.__right_border, **kwargs)
+        else:
+            items = self._get_local_nodes(left_border=self.__left_border,
+                                          right_border=self.__right_border, **kwargs)
+        return items
 
     @staticmethod
-    def __is_valid_slice(self):
-        pass
-
-    def __slice(self, object_: slice):
-        """ slice применяется в качестве ограничителя количества выборки.
-         Если указан start, то он является условием. Результат окажется пустым,
-         если количество записей в результате окажется меньше, чем число, указанное на позиции start в срезе. """
-        if not object_.step == 1:
-            raise ValueError("Выборка с шагом не поддерживается, шаг всегда 1")
-        if object_.start:
-            pass
+    def __is_valid_slice(obj: slice):
+        if obj.step is not None:
+            if not obj.step == 1:
+                raise ValueError("Выборка с шагом не поддерживается, шаг всегда 1")
+        start = obj.start if obj.start is not None else 0
+        end = obj.stop if obj.stop is not None else float("inf")
+        if start < 0:
+            raise ValueError
+        if end < 0:
+            raise ValueError
+        if start > end:
+            raise ValueError
 
 
 class BaseResult(ABC, ResultCacheTools, SliceResult):
@@ -2380,19 +2428,33 @@ class BaseResult(ABC, ResultCacheTools, SliceResult):
     # входящей строке вида: 'имя_таблицы:primary_key:значение'
 
     def __init__(self, get_nodes_from_database=None, get_local_nodes=None, only_local=False, only_database=False, **kwargs):
-        self.get_nodes_from_database: Optional[callable] = get_nodes_from_database  # Функция, в которой происходит получение контейнера с нодами из бд
-        self.get_local_nodes: Optional[callable] = get_local_nodes  # Функция, в которой происходит получение контейнера с нодами из кеша
+        self._get_nodes_from_database: Optional[callable] = get_nodes_from_database  # Функция, в которой происходит получение контейнера с нодами из бд
+        self._get_local_nodes: Optional[callable] = get_local_nodes  # Функция, в которой происходит получение контейнера с нодами из кеша
         self._id = self.__gen_id(**{**kwargs, "only_local": only_local, "only_database": only_database})
         self._only_queue = only_local
         self._only_db = only_database
         self._pointer: Optional["Pointer"] = None
-        self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
         self._is_slice = False
         self._is_sort = False
+        self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
         self.__is_valid()
         super().__init__(self._id)
         self._set_hash(self.items)
         self._set_primary_keys(self.__merged_data)
+
+    def get_nodes_from_database(self, **kwargs):
+        if self._only_queue:
+            return []
+        if hasattr(super(), "get_nodes_from_database"):
+            return super().get_nodes_from_database(**kwargs)
+        return self._get_nodes_from_database(**kwargs)
+
+    def get_local_nodes(self, **kwargs):
+        if self._only_db:
+            return []
+        if hasattr(super(), "get_local_nodes"):
+            return super().get_local_nodes(**kwargs)
+        return self._get_local_nodes(**kwargs)
 
     def has_changes(self, hash_value=None) -> Optional[Union[bool, ValueError]]:
         """ Изменились ли значения в результатах с момента последнего запроса has_changes.
@@ -2414,17 +2476,22 @@ class BaseResult(ABC, ResultCacheTools, SliceResult):
             if not new_hash == old_hash:
                 return True
             return False
-        self._set_hash(nodes)
         if hash_value in map(str, map(hash, nodes)):
+            self._set_hash(nodes)
             return False
         if not self._is_node_hash_has_been_in_result(hash_value):
+            self._set_hash(nodes)
             return
         if hash_value in self._get_primary_keys_hash():
             if hash_value not in [node.hash_by_pk for node in nodes]:
+                self._set_hash(nodes)
                 return True
-            if nodes[hash_value] not in self._get_hash():
+            if nodes[hash_value].__hash__() not in self._get_hash():
+                self._set_hash(nodes)
                 return True
+            self._set_hash(nodes)
             return False
+        self._set_hash(nodes)
         if hash_value in self._get_checked_hash_items():
             self._remove_hash_from_checked(hash_value)
             return False
@@ -2539,7 +2606,7 @@ class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
         self._model = model
         super().__init__(*args, model=model, where=where, **kwargs)
 
-    def _merge(self, max_count=None):
+    def _merge(self):
         output = ServiceOrmContainer()
         local_items = self.get_local_nodes()
         database_items = self.get_nodes_from_database()
