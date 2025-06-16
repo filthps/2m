@@ -504,6 +504,53 @@ class TestToolItemQueue(unittest.TestCase):
         queue.remove(Machine, "machineid", 3)
         self.assertEqual(0, len(queue))
 
+    def test_add(self):
+        queue = Queue([{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                        "_delete": False, "_create_at": datetime.datetime.now(),
+                        "machinename": "Test", "machineid": 1},
+                       {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                        "_delete": False, "_create_at": datetime.datetime.now(),
+                        "machinename": "Test1", "machineid": 2},
+                       {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                        "_delete": False, "_create_at": datetime.datetime.now(),
+                        "machinename": "NewTest", "machineid": 3
+                        }])
+        other_queue = Queue([{"_model": Condition, "cnd": str(uuid4()), "_insert": True},
+                             {"_model": Cnc, "cncid": 2, "_insert": True}])
+        self.assertEqual(5, (other_queue + queue).__len__())
+        queue_after_concat = queue + other_queue
+        first_node = queue_after_concat[0]
+        last_node = queue_after_concat[-1]
+        self.assertEqual("Test", first_node["machinename"])
+        self.assertEqual(last_node["cncid"], 2)
+        self.assertEqual(3, queue_after_concat[2]["machineid"])
+        self.assertEqual(queue.__len__(), 3)
+        self.assertEqual(2, other_queue.__len__())
+
+    def test_iadd(self):
+        queue = Queue([{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                        "_delete": False, "_create_at": datetime.datetime.now(),
+                        "machinename": "Test", "machineid": 1},
+                       {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                        "_delete": False, "_create_at": datetime.datetime.now(),
+                        "machinename": "Test1", "machineid": 2},
+                       {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                        "_delete": False, "_create_at": datetime.datetime.now(),
+                        "machinename": "NewTest", "machineid": 3
+                        }])
+        other_queue = Queue([{"_model": Condition, "cnd": str(uuid4()), "_insert": True},
+                             {"_model": Cnc, "cncid": 2, "_insert": True}])
+        self.assertEqual(queue.__len__(), 3)
+        self.assertEqual(2, other_queue.__len__())
+        queue += other_queue
+        self.assertEqual(2, len(other_queue))
+        self.assertEqual(5, queue.__len__())
+        first_node = queue[0]
+        last_node = queue[-1]
+        self.assertEqual("Test", first_node["machinename"])
+        self.assertEqual(last_node["cncid"], 2)
+        self.assertEqual(3, queue[2]["machineid"])
+
 
 class TestResultORMCollection(unittest.TestCase):
     def setUp(self) -> None:
