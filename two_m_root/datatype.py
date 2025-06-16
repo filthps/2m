@@ -1,11 +1,44 @@
+""" Copyright (C) 2025 Литовченко Виктор Иванович (filthps) """
 import weakref
 import copy
 from weakref import ref
+from abc import ABC, abstractmethod
 from itertools import zip_longest
 from typing import Optional, Iterable, Union, Any, Iterator
 
 
-class LinkedListItem:
+class AbstractNode(ABC):
+    @property
+    @abstractmethod
+    def value(self) -> dict:
+        """ Непосредственно - содержимое ноды. """
+        ...
+
+    @property
+    @abstractmethod
+    def next(self):
+        """ Ссылка на следующую ноду. """
+        ...
+
+    @next.setter
+    @abstractmethod
+    def next(self, node: "LinkedListItem"):
+        """ Ссылка на следующую ноду. """
+        ...
+
+    @property
+    @abstractmethod
+    def prev(self):
+        """ Ссылка на предыдущую ноду. """
+        ...
+
+    @prev.setter
+    @abstractmethod
+    def prev(self, node: "LinkedListItem"):
+        ...
+
+
+class LinkedListItem(AbstractNode):
     def __init__(self, **values):
         self._val = values
         self._index = 0
@@ -103,7 +136,11 @@ class LinkedList:
         """
         Добавить ноду в нонец
         """
-        new_element = self.LinkedListItem(*args, **kwargs) if node_item is None else node_item
+        if node_item is not None:
+            self._is_valid_node(node_item)
+            new_element = self.LinkedListItem(**node_item.get_attributes())
+        else:
+            new_element = self.LinkedListItem(*args, **kwargs)
         if self:
             last_elem = self._tail
             self.__set_next(last_elem, new_element)
@@ -242,6 +279,8 @@ class LinkedList:
             raise ValueError("Шаг не поддерживается. В этом нету необходимости.")
         if slice_.stop == float("inf") and slice_.start == 0:
             return
+        if self._tail is None and self._head is None:
+            return
         start = slice_.start if slice_.start is not None else 0
         stop = slice_.stop if slice_.stop is not None else self._tail.index
         if type(start) is not int:
@@ -263,6 +302,8 @@ class LinkedList:
 
     def _get_slice(self, item: slice) -> "LinkedList":
         self._is_valid_slice(item)
+        if self._tail is None and self._head is None:
+            return self.__class__()
         left = self._support_negative_index(item.start if item.start is not None else 0)
         right = self._support_negative_index(item.stop if item.stop is not None and not item.stop == float("inf")
                                              else self._tail.index)
@@ -303,6 +344,11 @@ class LinkedList:
             return
         if index not in range(self._tail.index + 1):
             raise IndexError
+
+    @classmethod
+    def _is_valid_node(cls, node):
+        if not isinstance(node, cls.LinkedListItem):
+            raise TypeError
 
     @staticmethod
     def __set_next(left_item: Union[LinkedListItem, weakref.ref], right_item: Union[LinkedListItem, weakref.ref]):
