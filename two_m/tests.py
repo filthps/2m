@@ -1116,10 +1116,61 @@ class TestSliceMixin(unittest.TestCase, SetUp):
         self.set_data_into_queue()
         result_obj = self.orm_manager.get_items(_model=Machine)
         result_obj[:1]
-        print(len(result_obj))
+        # todo
 
 
-class TestLettersSort(unittest.TestCase, SetUp):
+class LetterSort(unittest.TestCase):
+    def test_init(self):
+        LetterSortSingleNodes(Machine, "machinename", ServiceOrmContainer())
+        LetterSortNodesChain(Cnc, "name", [ServiceOrmContainer()])
+        with self.assertRaises((TypeError, ValueError,)):
+            LetterSortSingleNodes()
+            LetterSortSingleNodes("field_n")
+            LetterSortSingleNodes(4)
+            LetterSortSingleNodes(None, None)
+            LetterSortSingleNodes(b"0xe45")
+            LetterSortSingleNodes("field", [])
+            LetterSortSingleNodes("field", 5)
+            LetterSortSingleNodes("field", b"23dfg")
+            LetterSortSingleNodes("field", None)
+            LetterSortSingleNodes("field", False)
+            LetterSortSingleNodes("field", True)
+            LetterSortSingleNodes("field", "we3rfasdf")
+            LetterSortSingleNodes("field", 6.8)
+            LetterSortSingleNodes(6, [ResultORMCollection()])
+            LetterSortSingleNodes(None, [ResultORMCollection()])
+            LetterSortSingleNodes("", [ResultORMCollection()])
+            LetterSortSingleNodes("column", "str")
+            LetterSortSingleNodes("column", [])
+            LetterSortSingleNodes("column", b"0x245")
+            LetterSortSingleNodes("column", {"1": True})
+            LetterSortSingleNodes("column", ResultORMCollection(), [ResultORMCollection()])   
+            LetterSortNodesChain()
+            LetterSortNodesChain("field_n")
+            LetterSortNodesChain(4)
+            LetterSortNodesChain(None, None)
+            LetterSortNodesChain(b"0xe45")
+            LetterSortNodesChain("field", [])
+            LetterSortNodesChain("field", 5)
+            LetterSortNodesChain("field", b"23dfg")
+            LetterSortNodesChain("field", None)
+            LetterSortNodesChain("field", False)
+            LetterSortNodesChain("field", True)
+            LetterSortNodesChain("field", "we3rfasdf")
+            LetterSortNodesChain("field", 6.8)
+            LetterSortNodesChain(6, [ResultORMCollection()])
+            LetterSortNodesChain(None, [ResultORMCollection()])
+            LetterSortNodesChain("", [ResultORMCollection()])
+            LetterSortNodesChain("column", "str")
+            LetterSortNodesChain("column", [])
+            LetterSortNodesChain("column", b"0x245")
+            LetterSortNodesChain("column", {"1": True})
+            LetterSortNodesChain("column", ResultORMCollection(), [ResultORMCollection()])
+        with self.assertRaises(AttributeError):
+            LetterSortSingleNodes(Machine, "str_er", ServiceOrmContainer())
+
+
+class TestLettersSortSingleResult(unittest.TestCase, SetUp):
     def setUp(self) -> None:
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                  "_delete": False, "_create_at": datetime.datetime.now(),
@@ -1139,39 +1190,42 @@ class TestLettersSort(unittest.TestCase, SetUp):
                 {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                  "_delete": False, "_create_at": datetime.datetime.now(),
                  "machinename": "ZName", "machineid": 419}]
-        container = ServiceOrmContainer(data)
-        self.test_result_collection = ResultORMCollection(container)
+        ServiceOrmContainer.LinkedListItem = ServiceOrmItem
+        self.test_result_collection = ServiceOrmContainer(data)
 
     def test_original_ordering(self):
         """ Убедимся, что ноды расположены в исходном порядке,- в том, в котором они были переданы при инициализации.
         Убедимся, что наш контейнер не перевирает очерёдность."""
-        machine_names = ["Test", "Name", "NewTest", "Test4"]
+        machine_names = ["Test", "Name", "NewTest", "Test4", "Amacgdfg", "ZName"]
         self.assertEqual([i["machinename"] for i in self.test_result_collection], machine_names)
-        machine_id = [1, 4, 2, 3]
+        machine_id = [1, 4, 2, 3, 8, 419]
         self.assertEqual(list(map(lambda x: x["machineid"], self.test_result_collection)), machine_id)
 
     def test_sort_single_init(self):
-        _ = LettersSort("machinename", nodes=self.test_result_collection)
+        _ = LetterSortSingleNodes("machinename", self.test_result_collection)
 
     def test_receive_invalid_instance(self):
         with self.assertRaises(TypeError):
-            LettersSort("field_name", nodes=Queue())
-            LettersSort("field_name", nodes=object())
-            LettersSort("field_name", nodes=Queue())
-            LettersSort("field_name", nodes=12)
-            LettersSort("field_name", nodes=[1,2,5])
-            LettersSort(4, nodes=Queue())
-            LettersSort(Queue(), nodes=Queue())
-            LettersSort(ResultORMCollection(), nodes=Queue())
-            LettersSort(4, nodes=self.test_result_collection)
-            LettersSort(["stry", "gd"], nodes=self.test_result_collection)
-            LettersSort(["stry"], nodes=self.test_result_collection)
-            LettersSort("field", nodes_group_chain=ResultORMCollection())
-            LettersSort(4, nodes_group_chain=ResultORMCollection())
-            LettersSort("field", nodes_group_chain=45)
-            LettersSort("field", nodes_group_chain="34535")
-        with self.assertRaises(ValueError):
-            LettersSort("", nodes=ResultORMCollection())
+            LetterSortSingleNodes("field_name", Queue())
+            LetterSortSingleNodes("field_name", object())
+            LetterSortSingleNodes("field_name", Queue())
+            LetterSortSingleNodes("field_name", 12)
+            LetterSortSingleNodes("field_name", [1,2,5])
+            LetterSortSingleNodes(4, Queue())
+            LetterSortSingleNodes(Queue(), Queue())
+            LetterSortSingleNodes(ResultORMCollection(), Queue())
+            LetterSortSingleNodes(4, self.test_result_collection)
+            LetterSortSingleNodes(["stry", "gd"], self.test_result_collection)
+            LetterSortSingleNodes(["stry"], self.test_result_collection)
+            LetterSortSingleNodes("field", ResultORMCollection())
+            LetterSortSingleNodes(4, ResultORMCollection())
+            LetterSortSingleNodes("field", 45)
+            LetterSortSingleNodes("field", "34535")
+            LetterSortSingleNodes(Cnc, "field", 45)
+            LetterSortSingleNodes(HeadVarible, "field", "34535")
+        with self.assertRaises(AttributeError):
+            LetterSortSingleNodes(Machine, "", ServiceOrmContainer())
+            LetterSortSingleNodes(Machine, "undefined_column", ServiceOrmContainer())
 
     def test_original_ordering_is_rand(self):
         """ Убедимся, что исходное расположение не является верным ни для одного из вариантов сортировки,
@@ -1183,27 +1237,307 @@ class TestLettersSort(unittest.TestCase, SetUp):
         self.assertNotEqual(lengths, sorted(lengths, reverse=True))
         self.assertNotEqual([node["machineid"] for node in self.test_result_collection], id_)
         self.assertNotEqual([node["machineid"] for node in self.test_result_collection], id_decr)
-        machine_names_sorted = ['Amacgdfg', 'Name', 'NewTest', 'Test', 'Test4', 'ZName']
-        machine_names_sorted_reversed = sorted(machine_names_sorted, reverse=True)
-        self.assertNotEqual([node["machinename"] for node in self.test_result_collection], machine_names_sorted)
-        self.assertNotEqual([node["machinename"] for node in self.test_result_collection], machine_names_sorted_reversed)
+        machine_names_sorted_by_alphabet = ['Amacgdfg', 'Name', 'NewTest', 'Test', 'Test4', 'ZName']
+        machine_names_sorted_by_alphabet_reversed = sorted(machine_names_sorted_by_alphabet, reverse=True)
+        machine_names_sorted_by_length = ['Amacgdfg', 'NewTest', 'Test4', 'ZName', 'Test', 'Name']
+        machine_names_sorted_by_length_reversed = ['Test', 'Name', 'Test4', 'ZName', 'NewTest', 'Amacgdfg']
+        self.assertNotEqual([node["machinename"] for node in self.test_result_collection], machine_names_sorted_by_alphabet)
+        self.assertNotEqual([node["machinename"] for node in self.test_result_collection], machine_names_sorted_by_alphabet_reversed)
+        self.assertNotEqual([node["machinename"] for node in self.test_result_collection], machine_names_sorted_by_length)
+        self.assertNotEqual([node["machinename"] for node in self.test_result_collection], machine_names_sorted_by_length_reversed)
 
-    def test_sort_by_field_decr(self):
+    def test_alphabet_sort_decr(self):
         """ Тестировать сортировку по столбцу со строкой, на убывание.
-        Сортировка производится по первой букве, согласно алфовитному порядку. """
-        sorted_items = LettersSort("machinename", self.test_result_collection, decr=True)
+        Сортировка производится по первой букве, согласно алфавитному порядку. """
+        sorted_items = LetterSortSingleNodes(Machine, "machinename", self.test_result_collection, reverse=True)
         sorted_collection = sorted_items.sort_by_alphabet()
         self.assertEqual(['Amacgdfg', 'Name', 'NewTest', 'Test', 'Test4', 'ZName'],
                          [node["machinename"] for node in sorted_collection])
 
-    def test_sort_by_field_incr(self):
+    def test_alphabet_sort_incr(self):
         """ Тестировать сортировку по столбцу со строкой, на убывание.
-        Сортировка производится по первой букве, согласно алфовитному порядку. """
-        sorted_items = LettersSort("machinename", self.test_result_collection, decr=False)
+        Сортировка производится по первой букве, согласно алфавитному порядку. """
+        sorted_items = LetterSortSingleNodes(Machine, "machinename", self.test_result_collection, reverse=False)
         sorted_collection = sorted_items.sort_by_alphabet()
         self.assertEqual(['ZName', 'Test', 'Test4', 'Name', 'NewTest', 'Amacgdfg'],
                          [node["machinename"] for node in sorted_collection])
 
-    def test_sort_by_string_length(self):
-        sorted_items = LettersSort("machinename", self.test_result_collection, decr=False)
+    def test_sort_by_string_length_decr(self):
+        valid_names = ('Amacgdfg', 'NewTest', 'Test4', 'ZName', 'Test', 'Name')
+        sorted_items = LetterSortSingleNodes(Machine, "machinename", self.test_result_collection, reverse=True)
         sorted_collection = sorted_items.sort_by_string_length()
+        self.assertEqual(valid_names, tuple(map(lambda node: node["machinename"], sorted_collection)))
+
+    def test_sort_by_string_length_incr(self):
+        valid_names = ('Test', 'Name', 'Test4', 'ZName', 'NewTest', 'Amacgdfg')
+        sorted_items = LetterSortSingleNodes(Machine, "machinename", self.test_result_collection, reverse=False)
+        sorted_collection = sorted_items.sort_by_string_length()
+        self.assertEqual(tuple(map(lambda node: node["machinename"], sorted_collection)), valid_names)
+
+
+class LetterSortJoinResult(unittest.TestCase, SetUp):
+    def setUp(self) -> None:
+        pairs_data = [
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "Some", "machineid": 5, "cncid": 5},
+             {"cncid": 5, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.now(), "name": "cndsf"}],
+            [{"_model": Machine, "_ready": True, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "Som54he", "machineid": 6, "cncid": 6},
+             {"cncid": 6, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_update": True,
+              "_create_at": datetime.datetime.now(), "name": "cncdsf"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "Test12", "machineid": 2, "cncid": 2},
+             {"cncid": 2, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.now(), "name": "dsff454g"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "Test12345g", "machineid": 3, "cncid": 3},
+             {"cncid": 3, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_update": True,
+              "_create_at": datetime.datetime.now(), "name": "cnc657"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "SomeTest12", "machineid": 4, "cncid": 4},
+             {"cncid": 4, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.now(), "name": "dsf"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "Test", "machineid": 1, "cncid": 1},
+             {"cncid": 1, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.now(), "name": "name"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "TestMachineName", "machineid": 7, "cncid": 7},
+             {"cncid": 7, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.now(), "name": "Aname"}]
+        ]
+        ServiceOrmContainer.LinkedListItem = ServiceOrmItem
+        self.joined_data = []
+        for pair in pairs_data:
+            self.joined_data.append(ServiceOrmContainer(pair))
+
+    def test_original_ordering_is_rand(self):
+        """ Убедимся, что исходное расположение не является верным ни для одного из вариантов сортировки,
+         дабы избежать совпадения. """
+        id_ = list(range(1, 8))
+        id_rev = id_.copy()
+        id_rev.reverse()
+
+        def id_gen(column: str):
+            for group in self.joined_data:
+                for node in group:
+                    if node.get_primary_key_and_value(only_key=True) == column:
+                        yield node[column]
+        self.assertNotEqual(list(id_gen("cncid")), id_)
+        self.assertNotEqual(list(id_gen("cncid")), id_rev)
+        self.assertNotEqual(list(id_gen("machineid")), id_)
+        self.assertNotEqual(list(id_gen("machineid")), id_rev)
+        # todo
+
+    def test_alphabet_sort_decr(self):
+        """ Тестировать сортировку по столбцу со строкой, на убывание.
+        Сортировка производится по первой букве, согласно алфавитному порядку. """
+        instance = LetterSortNodesChain(Cnc, "name", self.joined_data, reverse=True)
+        sorted_ = instance.sort_by_alphabet()
+        self.assertEqual([n["Cnc"]["name"] for n in sorted_], ['Aname', 'cndsf', 'cncdsf', 'cnc657', 'dsff454g', 'dsf', 'name'])
+        self.assertTrue(all(map(lambda x: len(x) == 2, sorted_)))
+        self.assertTrue(all(map(lambda joined_item: joined_item["Cnc"]["cncid"] == joined_item["Machine"]["cncid"], sorted_)))
+
+    def test_alphabet_sort_incr(self):
+        """ Тестировать сортировку по столбцу со строкой, на возрастание.
+        Сортировка производится по первой букве, согласно алфавитному порядку. """
+        instance = LetterSortNodesChain(Cnc, "name", self.joined_data, reverse=False)
+        sorted_ = instance.sort_by_alphabet()
+        self.assertEqual(['name', 'dsff454g', 'dsf', 'cndsf', 'cncdsf', 'cnc657', 'Aname'], [n["Cnc"]["name"] for n in sorted_])
+        self.assertTrue(all(map(lambda x: len(x) == 2, sorted_)))
+        self.assertTrue(all(map(lambda joined_item: joined_item["Cnc"]["cncid"] == joined_item["Machine"]["cncid"], sorted_)))
+
+    def test_sort_by_string_length_decr(self):
+        instance = LetterSortNodesChain(Cnc, "name", self.joined_data, reverse=True)
+        sorted_ = instance.sort_by_string_length()
+        self.assertEqual([node["Cnc"]["name"] for node in sorted_], ['dsff454g', 'cnc657', 'Aname', 'name', 'dsf'])
+        self.assertTrue(all(map(lambda x: len(x) == 2, sorted_)))
+        self.assertTrue(all(map(lambda joined_item: joined_item["Cnc"]["cncid"] == joined_item["Machine"]["cncid"], sorted_)))
+
+    def test_sort_by_string_length_incr(self):
+        instance = LetterSortNodesChain(Cnc, "name", self.joined_data, reverse=False)
+        sorted_ = instance.sort_by_string_length()
+        self.assertEqual([node["Cnc"]["name"] for node in sorted_], ['dsf', 'name', 'Aname', 'cnc657', 'dsff454g'])
+        self.assertTrue(all(map(lambda x: len(x) == 2, sorted_)))
+        self.assertTrue(all(map(lambda joined_item: joined_item["Cnc"]["cncid"] == joined_item["Machine"]["cncid"], sorted_)))
+
+
+class TestNumberSort(unittest.TestCase, SetUp):
+    def setUp(self) -> None:
+        data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(),
+                 "machinename": "Test", "machineid": 1},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(),
+                 "machinename": "Name", "machineid": 4},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(),
+                 "machinename": "NewTest", "machineid": 2
+                 }, {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                  "_delete": False, "_create_at": datetime.datetime.now(),
+                  "machinename": "Test4", "machineid": 3},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(),
+                 "machinename": "Amacgdfg", "machineid": 8},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.now(),
+                 "machinename": "ZName", "machineid": 419}]
+        ServiceOrmContainer.LinkedListItem = ServiceOrmItem
+        self.single_result_collection = ServiceOrmContainer(data)
+        pairs_data = [
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "Some", "machineid": 5, "cncid": 5},
+             {"cncid": 5, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.now(), "name": "cndsf"}],
+            [{"_model": Machine, "_ready": True, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "Som54he", "machineid": 6, "cncid": 6},
+             {"cncid": 6, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_update": True,
+              "_create_at": datetime.datetime.now(), "name": "cncdsf"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "Test12", "machineid": 2, "cncid": 2},
+             {"cncid": 2, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.now(), "name": "dsff454g"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "Test12345g", "machineid": 3, "cncid": 3},
+             {"cncid": 3, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_update": True,
+              "_create_at": datetime.datetime.now(), "name": "cnc657"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "SomeTest12", "machineid": 4, "cncid": 4},
+             {"cncid": 4, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.now(), "name": "dsf"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "Test", "machineid": 1, "cncid": 1},
+             {"cncid": 1, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.now(), "name": "name"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.now(),
+              "machinename": "TestMachineName", "machineid": 7, "cncid": 7},
+             {"cncid": 7, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.now(), "name": "Aname"}]
+        ]
+        ServiceOrmContainer.LinkedListItem = ServiceOrmItem
+        self.joined_data = []
+        for pair in pairs_data:
+            self.joined_data.append(ServiceOrmContainer(pair))
+
+    def test_init(self):
+        NumberSortSingleNodes(Machine, "machineid", ServiceOrmContainer())
+        NumberSortNodesChain(Cnc, "cncid", [ServiceOrmContainer()])
+        with self.assertRaises((TypeError, ValueError,)):
+            NumberSortSingleNodes(Machine, "machinename", ServiceOrmContainer())
+            NumberSortSingleNodes()
+            NumberSortSingleNodes("field_n")
+            NumberSortSingleNodes(4)
+            NumberSortSingleNodes(None, None)
+            NumberSortSingleNodes(b"0xe45")
+            NumberSortSingleNodes("field", [])
+            NumberSortSingleNodes("field", 5)
+            NumberSortSingleNodes("field", b"23dfg")
+            NumberSortSingleNodes("field", None)
+            NumberSortSingleNodes("field", False)
+            NumberSortSingleNodes("field", True)
+            NumberSortSingleNodes("field", "we3rfasdf")
+            NumberSortSingleNodes("field", 6.8)
+            NumberSortSingleNodes(6, [ResultORMCollection()])
+            NumberSortSingleNodes(None, [ResultORMCollection()])
+            NumberSortSingleNodes("", [ResultORMCollection()])
+            NumberSortSingleNodes("column", "str")
+            NumberSortSingleNodes("column", [])
+            NumberSortSingleNodes("column", b"0x245")
+            NumberSortSingleNodes("column", {"1": True})
+            NumberSortSingleNodes("column", ResultORMCollection(), [ResultORMCollection()])
+            NumberSortNodesChain()
+            NumberSortNodesChain("field_n")
+            NumberSortNodesChain(4)
+            NumberSortNodesChain(None, None)
+            NumberSortNodesChain(b"0xe45")
+            NumberSortNodesChain("field", [])
+            NumberSortNodesChain("field", 5)
+            NumberSortNodesChain("field", b"23dfg")
+            NumberSortNodesChain("field", None)
+            NumberSortNodesChain("field", False)
+            NumberSortNodesChain("field", True)
+            NumberSortNodesChain("field", "we3rfasdf")
+            NumberSortNodesChain("field", 6.8)
+            NumberSortNodesChain(6, [ResultORMCollection()])
+            NumberSortNodesChain(None, [ResultORMCollection()])
+            NumberSortNodesChain("", [ResultORMCollection()])
+            NumberSortNodesChain("column", "str")
+            NumberSortNodesChain("column", [])
+            NumberSortNodesChain("column", b"0x245")
+            NumberSortNodesChain("column", {"1": True})
+            NumberSortNodesChain("column", ResultORMCollection(), [ResultORMCollection()])
+        with self.assertRaises(AttributeError):
+            NumberSortSingleNodes(Machine, "str_er", ServiceOrmContainer())
+
+    def test_original_ordering(self):
+        """ Убедимся, что ноды расположены в исходном порядке,- в том, в котором они были переданы при инициализации.
+        Убедимся, что наш контейнер не перевирает очерёдность."""
+        machine_names = ["Test", "Name", "NewTest", "Test4", "Amacgdfg", "ZName"]
+        self.assertEqual([i["machinename"] for i in self.single_result_collection], machine_names)
+        machine_id = [1, 4, 2, 3, 8, 419]
+        self.assertEqual(list(map(lambda x: x["machineid"], self.single_result_collection)), machine_id)
+        id_ = list(range(1, 8))
+        id_rev = id_.copy()
+        id_rev.reverse()
+
+        def id_gen(column: str):
+            for group in self.joined_data:
+                for node in group:
+                    if node.get_primary_key_and_value(only_key=True) == column:
+                        yield node[column]
+        self.assertNotEqual(list(id_gen("cncid")), id_)
+        self.assertNotEqual(list(id_gen("cncid")), id_rev)
+        self.assertNotEqual(list(id_gen("machineid")), id_)
+        self.assertNotEqual(list(id_gen("machineid")), id_rev)
+
+    def test_sort_single_result_items_incr(self):
+        instance = NumberSortSingleNodes(Machine, "machineid", self.single_result_collection, reverse=False)
+        sorter_elems = instance.sort()
+        self.assertEqual([n["machineid"] for n in sorter_elems], [1, 2, 3, 4, 8, 419])
+
+    def test_sort_single_result_items_decr(self):
+        instance = NumberSortSingleNodes(Machine, "machineid", self.single_result_collection, reverse=True)
+        sorter_elems = instance.sort()
+        self.assertEqual([n["machineid"] for n in sorter_elems], [419, 8, 4, 3, 2, 1])
+
+    def test_sort_group_result_items_incr(self):
+        instance = NumberSortNodesChain(Machine, "machineid", self.joined_data, reverse=False)
+        elems = instance.sort()
+        self.assertEqual([n["Machine"]["machineid"] for n in elems], [1, 2, 3, 4, 5, 6, 7])
+
+    def test_sort_group_result_items_decr(self):
+        instance = NumberSortNodesChain(Machine, "machineid", self.joined_data, reverse=True)
+        elems = instance.sort()
+        self.assertEqual([n["Machine"]["machineid"] for n in elems], [7, 6, 5, 4, 3, 2, 1])
+
+
+class ResultSort(unittest.TestCase, SetUp):
+    def setUp(self) -> None:
+        drop_db()
+        create_db()
+        init_all_triggers(DATABASE_PATH)
+        Tool.CACHE_LIFETIME_HOURS = 60
+        self.orm_manager = Tool()
+        self.orm_manager.connection.drop_cache()
+        self.set_data_into_database()
+        self.set_data_into_queue()
+
+    def test_sort_by_primary_key(self):
+        query = self.orm_manager.get_items(_model=Machine)
+        query.order_by(by_primary_key=True, alphabet=True)
+
