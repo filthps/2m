@@ -148,15 +148,20 @@ class LinkedList:
             self._tail = new_element
         else:
             self._head = self._tail = new_element
+        return new_element
 
-    def add_to_head(self, **kwargs):
+    def add_to_head(self, node_item=None, **kwargs):
         """
         Добавить ноду в начало
         """
-        node = self.LinkedListItem(**kwargs)
+        if node_item is not None:
+            self._is_valid_node(node_item)
+            node = self.LinkedListItem(**node_item.get_attributes())
+        else:
+            node = self.LinkedListItem(**kwargs)
         if not self:
             self._head = self._tail = node
-            return
+            return node
         first_elem = self._head
         if self._head == self._tail:
             node.index = 0
@@ -167,6 +172,7 @@ class LinkedList:
         first_elem.prev = node
         node.index = first_elem.index
         self.__incr_indexes(first_elem)
+        return node
 
     def replace(self, old_node: LinkedListItem, new_node: LinkedListItem):
         if not isinstance(old_node, self.LinkedListItem) or not isinstance(new_node, self.LinkedListItem):
@@ -345,9 +351,8 @@ class LinkedList:
         if index not in range(self._tail.index + 1):
             raise IndexError
 
-    @classmethod
-    def _is_valid_node(cls, node):
-        if not isinstance(node, cls.LinkedListItem):
+    def _is_valid_node(self, node):
+        if not isinstance(node, self.LinkedListItem):
             raise TypeError
 
     @staticmethod
