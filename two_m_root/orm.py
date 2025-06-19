@@ -527,14 +527,21 @@ class QueueNodeSearchTool(LinkedList):
             return
 
     def append(self, *args, node_item=None, **kwargs):  # O(1)
-        new_item = self.LinkedListItem(*args, **kwargs) if node_item is None else node_item  # O(1)
-        self.__is_valid_node(new_item)  # O(1)
-        super().append(node_item=new_item)  # O(1)
+        if node_item is not None:
+            self.__is_valid_node(node_item)  # O(1)
+            new_item = self.LinkedListItem(**node_item.get_attributes())
+        else:
+            new_item = self.LinkedListItem(*args, **kwargs)
+        new_item = super().append(node_item=new_item)  # O(1)
         self.__add_node(new_item)  # O(1)
 
-    def add_to_head(self, **kwargs):  # O(n)
-        new_item = self.LinkedListItem(**kwargs)  # O(1)
-        super().add_to_head(node_item=new_item)  # O(n)
+    def add_to_head(self, new_item=None, **kwargs):  # O(n)
+        if new_item is not None:
+            self.__is_valid_node(new_item)
+            new_item = self.LinkedListItem(**new_item.get_attributes())
+        else:
+            new_item = self.LinkedListItem(**kwargs)  # O(1)
+        new_item = super().add_to_head(node_item=new_item)  # O(n)
         self.__reset_mappings_and_indexes()  # O(n)
         self.__add_node(new_item)  # O(1)
 
@@ -650,7 +657,6 @@ class QueueNodeSearchTool(LinkedList):
     def __get_slice(self, obj: slice):
         if not isinstance(obj, slice):
             raise TypeError
-
 
 
 class Queue(LinkedList):
