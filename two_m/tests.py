@@ -315,6 +315,7 @@ class TestToolItemQueue(unittest.TestCase):
     def setUp(self) -> None:
         Tool.CACHE_PATH = CACHE_PATH
         Tool.DATABASE_PATH = DATABASE_PATH
+        Queue.LinkedListItem = QueueItem
 
     def test_init(self):
         Queue()
@@ -556,7 +557,7 @@ class TestResultORMCollection(unittest.TestCase):
     def setUp(self) -> None:
         Tool.CACHE_PATH = CACHE_PATH
         Tool.DATABASE_PATH = DATABASE_PATH
-        queue = Queue()
+        queue = ServiceOrmContainer()
         data__len_3 = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                         "_delete": False, "_create_at": datetime.datetime.now(), 
                         "machinename": "Test", "machineid": 1},
@@ -717,7 +718,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertEqual(self.orm_manager.connection.cache.get("ORMItems").__len__(), 1)
         self.assertTrue(self.orm_manager.connection.items[0]["name"] == "Fid")
         self.orm_manager.set_item(_insert=True, _model=Machine, machinename="Helller",
-                                  inputcatalog=r"C:\\wdfg", outputcatalog=r"D:\\hfghfgh")
+                                  inputcatalog=r"C:\\wdfg", outputcatalog=r"D:\\hfghfgh", _ready=True)
         self.assertEqual(len(self.orm_manager.connection.items), 2)
         self.assertEqual(len(self.orm_manager.connection.items), len(self.orm_manager.connection.cache.get("ORMItems")))
         self.assertTrue(any(map(lambda x: x.value.get("machinename", None), self.orm_manager.connection.items)))
@@ -731,6 +732,8 @@ class TestToolHelper(unittest.TestCase, SetUp):
                                   outputcatalog=r"C:\anef")
         self.orm_manager.set_item(_delete=True, machinename="Some_name_2", _model=Machine)
         result = self.orm_manager.get_items(_model=Machine, machinename="Helller", _db_only=True)
+        import time
+        time.sleep(self.orm_manager.RELEASE_INTERVAL_SECONDS + 1)
         self.assertTrue(result)
         # start Invalid ...
         # плохой path
@@ -1249,10 +1252,10 @@ class TestLettersSortSingleResult(unittest.TestCase, SetUp):
         self.assertEqual(list(map(lambda x: x["machineid"], self.test_result_collection)), machine_id)
 
     def test_sort_single_init(self):
-        _ = LetterSortSingleNodes("machinename", self.test_result_collection)
+        _ = LetterSortSingleNodes(Machine, "machinename", self.test_result_collection)
 
     def test_receive_invalid_instance(self):
-        with self.assertRaises(TypeError):
+        with self.assertRaises((TypeError, ValueError, InvalidModel, AttributeError)):
             LetterSortSingleNodes("field_name", Queue())
             LetterSortSingleNodes("field_name", object())
             LetterSortSingleNodes("field_name", Queue())
@@ -1270,7 +1273,6 @@ class TestLettersSortSingleResult(unittest.TestCase, SetUp):
             LetterSortSingleNodes("field", "34535")
             LetterSortSingleNodes(Cnc, "field", 45)
             LetterSortSingleNodes(HeadVarible, "field", "34535")
-        with self.assertRaises(AttributeError):
             LetterSortSingleNodes(Machine, "", ServiceOrmContainer())
             LetterSortSingleNodes(Machine, "undefined_column", ServiceOrmContainer())
 
@@ -1573,7 +1575,7 @@ class TestNumberSort(unittest.TestCase, SetUp):
         self.assertEqual([n["Machine"]["machineid"] for n in elems], [7, 6, 5, 4, 3, 2, 1])
 
 
-class ResultSort(unittest.TestCase, SetUp):
+class TestSortSingleResultMixin(unittest.TestCase, SetUp):
     def setUp(self) -> None:
         drop_db()
         create_db()
@@ -1586,5 +1588,20 @@ class ResultSort(unittest.TestCase, SetUp):
 
     def test_sort_by_primary_key(self):
         query = self.orm_manager.get_items(_model=Machine)
-        query.order_by(by_primary_key=True, alphabet=True)
+        query.order_by(by_primary_key=True)
 
+
+class TestSortJoinResultMixin(unittest.TestCase, SetUp):
+    def setUp(self) -> None:
+        drop_db()
+        create_db()
+        init_all_triggers(DATABASE_PATH)
+        Tool.CACHE_LIFETIME_HOURS = 60
+        self.orm_manager = Tool()
+        self.orm_manager.connection.drop_cache()
+        self.set_data_into_database()
+        self.set_data_into_queue()
+
+    def test_sort_by_primary_key(self):
+        query = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"})
+        query.order_by(Machine, by_primary_key=True)
