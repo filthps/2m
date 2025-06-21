@@ -65,6 +65,12 @@ class SetUp:
         :return:
         """
         self.orm_manager.connection.database.add(Cnc(name="NC210", commentsymbol=","))
+        self.orm_manager.connection.database.add(Cnc(name="NC211", commentsymbol=","))
+        self.orm_manager.connection.database.add(Cnc(name="NC212", commentsymbol=","))
+        self.orm_manager.connection.database.add(Cnc(name="NC213", commentsymbol=","))
+        self.orm_manager.connection.database.add(Cnc(name="NC214", commentsymbol=","))
+        self.orm_manager.connection.database.add(Cnc(name="NC215", commentsymbol=","))
+        self.orm_manager.connection.database.add(Cnc(name="NC216", commentsymbol=","))
         self.orm_manager.connection.database.add(Numeration())
         self.orm_manager.connection.database.add(Comment(findstr="test_str", iffullmatch=True))
         self.orm_manager.connection.database.commit()
@@ -79,6 +85,9 @@ class SetUp:
             operationdescription="Нумерация. Добавил сразу в БД"
         ))
         self.orm_manager.connection.database.add(OperationDelegation(commentid=self.orm_manager.connection.database.scalar(select(Comment)).commentid))
+        self.orm_manager.connection.database.add(Machine(machinename="Fidia_db", inputcatalog=r"C:\Wfghfg", outputcatalog=r"X:\pthnt", cncid=2))
+        self.orm_manager.connection.database.add(Machine(machinename="Rambauidu_db", inputcatalog=r"C:\Windows", outputcatalog=r"X:\pah", cncid=3))
+        self.orm_manager.connection.database.add(Machine(machinename="Her", inputcatalog=r"C:\ows", outputcatalog=r"X:\pa", cncid=4))
         self.orm_manager.connection.database.commit()
 
     def set_data_into_queue(self):
@@ -1367,6 +1376,7 @@ class LetterSortJoinResult(unittest.TestCase, SetUp):
         self.joined_data = []
         for pair in pairs_data:
             self.joined_data.append(ServiceOrmContainer(pair))
+        self.joined_data = tuple(self.joined_data)
 
     def test_original_ordering_is_rand(self):
         """ Убедимся, что исходное расположение не является верным ни для одного из вариантов сортировки,
@@ -1482,10 +1492,11 @@ class TestNumberSort(unittest.TestCase, SetUp):
         self.joined_data = []
         for pair in pairs_data:
             self.joined_data.append(ServiceOrmContainer(pair))
+        self.joined_data = tuple(self.joined_data)
 
     def test_init(self):
         NumberSortSingleNodes(Machine, "machineid", ServiceOrmContainer())
-        NumberSortNodesChain(Cnc, "cncid", [ServiceOrmContainer()])
+        NumberSortNodesChain(Cnc, "cncid", (ServiceOrmContainer(),))
         with self.assertRaises((TypeError, ValueError,)):
             NumberSortSingleNodes(Machine, "machinename", ServiceOrmContainer())
             NumberSortSingleNodes()
@@ -1587,8 +1598,11 @@ class TestSortSingleResultMixin(unittest.TestCase, SetUp):
         self.set_data_into_queue()
 
     def test_sort_by_primary_key(self):
-        query = self.orm_manager.get_items(_model=Machine)
-        query.order_by(by_primary_key=True)
+        query = self.orm_manager.get_items(_model=Machine, _db_only=True)
+        query.order_by(by_primary_key=True, decr=False)
+        self.assertEqual([i["machineid"] for i in query], [1, 2, 3, 4])
+        query.order_by(by_primary_key=True, decr=True)
+        self.assertEqual([i["machineid"] for i in query], [4, 3, 2, 1])
 
 
 class TestSortJoinResultMixin(unittest.TestCase, SetUp):
@@ -1603,5 +1617,9 @@ class TestSortJoinResultMixin(unittest.TestCase, SetUp):
         self.set_data_into_queue()
 
     def test_sort_by_primary_key(self):
-        query = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"})
+        query = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _db_only=True)
         query.order_by(Machine, by_primary_key=True)
+        query.order_by(Machine, by_primary_key=True, decr=False)
+        self.assertEqual([i["Machine"]["machineid"] for i in query], [1, 2, 3, 4])
+        query.order_by(Machine, by_primary_key=True, decr=True)
+        self.assertEqual([i["Machine"]["machineid"] for i in query], [4, 3, 2, 1])
