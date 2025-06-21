@@ -1179,8 +1179,9 @@ class BaseSortSingleNodes:
         if type(items[0]) is not ServiceOrmItem:
             raise TypeError
 
+
 class BaseSortJoinedNodes:
-    def __init__(self, model: CustomModel, field_name: str, items_group: list["ServiceOrmContainer"], **kwags):
+    def __init__(self, model: CustomModel, field_name: str, items_group: tuple["ServiceOrmContainer"], **kwags):
         self._is_valid_nodes_chain(items_group)
         self._nodes_chain = items_group
 
@@ -1403,6 +1404,7 @@ class NumberSortNodesChain(BaseNumberSort, BaseSortJoinedNodes):
                     container.append(node_item=node)
         return container
 
+
 class OrderByMixin(ABC):
     """ Реализация функционала для сортировки экземпляров ResultORMCollection в виде примеси для класса Result* """
     def __init__(self: Union["Result", "JoinSelectResult"], *args, **kwargs):
@@ -1433,7 +1435,7 @@ class OrderByMixin(ABC):
         self._by_alphabet = alphabet
         self._by_string_length = length
         self._by_time = by_create_time
-        self._reversed = not decr
+        self._reversed = decr
         self._is_sort = True
 
     def get_nodes_from_database(self, **kwargs):
@@ -1624,7 +1626,7 @@ class SQLAlchemyQueryManager:
             return
         session = Tool.connection.database
         while sorted_data:
-            node_group = sorted_data.pop(-1)
+            node_group = sorted_data.pop()
             if not node_group:
                 break
             multiple_items_in_transaction = True if len(node_group) > 1 else False
@@ -1639,19 +1641,19 @@ class SQLAlchemyQueryManager:
             if multiple_items_in_transaction:
                 try:
                     session.add_all(items_to_commit)
-                except SQLAlchemyError as error:
+                except SQLAlchemyError:
                     self.remaining_nodes += node_group
                     point.rollback()
             else:
                 try:
-                    session.execute(items_to_commit.pop())
-                except SQLAlchemyError as error:
+                    session.execute(items_to_commit.pop(0))
+                except SQLAlchemyError:
                     self.remaining_nodes += node_group
             try:
                 session.commit()
-            except SQLAlchemyError as error:
+            except SQLAlchemyError:
                 self.remaining_nodes += node_group
-            except DatabaseException as error:
+            except DatabaseException:
                 self.remaining_nodes += node_group
         self._sorted = []
         self._query_objects = {}
@@ -2056,10 +2058,12 @@ class Tool(ModelTools):
             if attrs:
                 items_db = items_db.filter_by(**attrs)
             if int_sort or string_sort:
-                items_db = items_db.order_by(int_sort or string_sort)
-            if reversed_:
-                pass
+                if reversed_:
+                    items_db = items_db.order_by(desc(int_sort or string_sort))
+                else:
+                    items_db = items_db.order_by(int_sort or string_sort)
             items_db = items_db.all()
+
             def add_to_queue():
                 result = Queue()
                 result.LinkedListItem = ServiceOrmItem
@@ -2225,13 +2229,13 @@ class Tool(ModelTools):
                         s += f".order_by("
                         if reversed_:
                             s += "desc("
-                        s += f"func.len('{model_in_sort.__tablename__}'.'{int_sort or string_sort}'))"
+                        s += f"func.length({model_in_sort.__tablename__}.{int_sort or string_sort}))"
                         if reversed_:
                             s += ")"
                     if by_alphabet:
                         if reversed_:
                             s += "desc("
-                        s += f".order_by('{model_in_sort.__tablename__}'.'{int_sort or string_sort}')"
+                        s += f".order_by({model_in_sort.__tablename__}.{int_sort or string_sort})"
                 return s
 
             def add_db_items_to_orm_queue() -> Iterator[ServiceOrmContainer]:  # O(i) * O(k) * O(m) * O(n) * O(j) * O(l)
