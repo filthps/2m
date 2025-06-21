@@ -29,7 +29,7 @@ from typing import Union, Iterator, Iterable, Optional, Literal, Type, Any
 from collections import ChainMap
 from pymemcache.client.base import PooledClient
 from sqlalchemy import create_engine, delete, insert, update, text, select
-from sqlalchemy.sql.expression import func
+from sqlalchemy.sql.expression import func, desc
 from sqlalchemy.sql.dml import Insert, Update, Delete
 from sqlalchemy.orm import Query, sessionmaker as session_factory, scoped_session
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -1216,8 +1216,8 @@ class BaseSortJoinedNodes:
         return d
 
     @staticmethod
-    def _is_valid_nodes_chain(items_group: list["ServiceOrmContainer"]):
-        if type(items_group) is not list:
+    def _is_valid_nodes_chain(items_group: tuple["ServiceOrmContainer"]):
+        if type(items_group) is not tuple:
             raise TypeError
         if any(map(lambda x: type(x) is not ServiceOrmContainer, items_group)):
             raise TypeError
@@ -1370,7 +1370,7 @@ class NumberSortSingleNodes(BaseNumberSort, BaseSortSingleNodes):
 
 
 class NumberSortNodesChain(BaseNumberSort, BaseSortJoinedNodes):
-    def __init__(self, model: CustomModel, field_name: str, nodes_group: list["ServiceOrmContainer"], reverse=False):
+    def __init__(self, model: CustomModel, field_name: str, nodes_group: tuple["ServiceOrmContainer"], reverse=False):
         self._is_valid_nodes_chain(nodes_group)
         if ModelTools.get_column_python_type(model, field_name) is not int:
             raise TypeError("Тип значения столбца от ноды, с заданным столбцом для сортировки, "
@@ -1544,9 +1544,6 @@ class OrderBySingleResultMixin(OrderByMixin):
         super().order_by(by_column_name, by_primary_key, by_create_time, length, alphabet,
                                        decr)
 
-    def _order_by(self, nodes: "ServiceOrmContainer") -> "ServiceOrmContainer":
-        ...
-
 
 class OrderByJoinResultMixin(OrderByMixin, ModelTools):
     """ Реализация для запросов с join. См Tool.join_select() """
@@ -1570,17 +1567,6 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
                                        decr)
         self._model = model
         super().order_by(by_column_name, by_primary_key, by_create_time, length, alphabet, decr)
-
-    def _order_by(self, nodes: Iterable["ServiceOrmContainer"]) -> list["ServiceOrmContainer"]:
-        ...
-
-    def _create_params_to_load_items(self) -> dict:
-        """ Создать параметры, передаваемые в геттер данных, на основе параметров,
-        переданных и мемоизированных, со стороны пользователя. """
-        if not self._is_sort:
-            return {}
-        if "by_primary_key" in self._order_by_kwargs:
-            return {}
 
     def __sort_nodes_by_create_time(self):
         def nodes_map():
@@ -2205,7 +2191,7 @@ class Tool(ModelTools):
                         )
             else:
                 if not len(models) == 1:
-                    raise ValueError("При join запросе таблицы 'замой на себя', должна быть указана 1 таблица, "
+                    raise ValueError("При join запросе таблицы 'самой на себя', должна быть указана 1 таблица, "
                                      "к которой выполняется запрос")
             check_transitivity_on_params()
         valid_params()
@@ -2234,6 +2220,18 @@ class Tool(ModelTools):
                                 s += ", "
                             on_keys_counter += 1
                         s += ")" if on_keys_counter == where.__len__() else ""
+                if model_in_sort:
+                    if by_length:
+                        s += f".order_by("
+                        if reversed:
+                            s += "desc("
+                        s += f"func.len('{model_in_sort.__tablename__}'.'{int_sort or string_sort}'))"
+                        if reversed:
+                            s += ")"
+                    if by_alphabet:
+                        if reversed:
+                            s += "desc("
+                        s += f".order_by('{model_in_sort.__tablename__}'.'{int_sort or string_sort}')"
                 return s
 
             def add_db_items_to_orm_queue() -> Iterator[ServiceOrmContainer]:  # O(i) * O(k) * O(m) * O(n) * O(j) * O(l)
@@ -2248,7 +2246,8 @@ class Tool(ModelTools):
                         row.append(_model=join_select_result.__class__, _insert=True, **r)  # O(l)
                     yield row
             sql_text = create_request()
-            query: Query = eval(sql_text, {"db": cls.connection.database}, ChainMap(*list(map(lambda x: {x.__name__: x}, models)), {"select": select}))
+            query: Query = eval(sql_text, {"db": cls.connection.database}, ChainMap(*list(map(lambda x: {x.__name__: x}, models)),
+                                                                                    {"desc": desc, "func": func}))
             return add_db_items_to_orm_queue()
 
         def collect_all_local_nodes():
