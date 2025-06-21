@@ -1480,7 +1480,7 @@ class OrderByMixin(ABC):
         if self._by_time:
             output.update({"by_create_time": True})
         if self._reversed:
-            output.update({"reversed": True})
+            output.update({"reversed_": True})
         return output
 
     @staticmethod
@@ -2046,7 +2046,7 @@ class Tool(ModelTools):
         def select_from_db(offset=0, limit=float("inf"),
                            int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                            by_length=False, by_alphabet=False, by_create_time=False,
-                           reversed=False, model_in_sort=None):
+                           reversed_=False, model_in_sort=None):
             try:
                 items_db = cls.connection.database.query(model).offset(offset).limit(limit)
             except OperationalError:
@@ -2057,7 +2057,7 @@ class Tool(ModelTools):
                 items_db = items_db.filter_by(**attrs)
             if int_sort or string_sort:
                 items_db = items_db.order_by(int_sort or string_sort)
-            if reversed:
+            if reversed_:
                 pass
             items_db = items_db.all()
             def add_to_queue():
@@ -2072,7 +2072,7 @@ class Tool(ModelTools):
         def select_from_cache(left_border=0, right_border=float("inf"),
                               int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                               by_length=False, by_alphabet=False, by_create_time=False,
-                              reversed=False, model_in_sort=None):
+                              reversed_=False, model_in_sort=None):
             return cls.connection.items.search_nodes(model, **attrs)
         return Result(get_nodes_from_database=select_from_db, get_local_nodes=select_from_cache,
                       only_local=_queue_only, only_database=_db_only, model=model, where=attrs)
@@ -2199,7 +2199,7 @@ class Tool(ModelTools):
         def collect_db_data(offset=0, limit=float("inf"),
                             int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                             by_length=False, by_alphabet=False, by_create_time=False,
-                            reversed=False, model_in_sort=None):
+                            reversed_=False, model_in_sort=None):
             def create_request() -> str:  # O(n) * O(m)
                 s = f"db.query({', '.join(map(lambda x: x.__name__, models))}).filter("
                 on_keys_counter = 0
@@ -2223,13 +2223,13 @@ class Tool(ModelTools):
                 if model_in_sort:
                     if by_length:
                         s += f".order_by("
-                        if reversed:
+                        if reversed_:
                             s += "desc("
                         s += f"func.len('{model_in_sort.__tablename__}'.'{int_sort or string_sort}'))"
-                        if reversed:
+                        if reversed_:
                             s += ")"
                     if by_alphabet:
-                        if reversed:
+                        if reversed_:
                             s += "desc("
                         s += f".order_by('{model_in_sort.__tablename__}'.'{int_sort or string_sort}')"
                 return s
@@ -2261,7 +2261,7 @@ class Tool(ModelTools):
         def collect_local_data(left_border=0, right_border=float("inf"),
                                int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                                by_length=False, by_alphabet=False, by_create_time=False,
-                               reversed=False, model_in_sort=None) -> Iterator[ServiceOrmContainer]:
+                               reversed_=False, model_in_sort=None) -> Iterator[ServiceOrmContainer]:
             def collect_node_values(on_keys_or_values: Union[dict.keys, dict.values]):
                 for node in collect_all_local_nodes():
                     for table_and_column in on_keys_or_values:
@@ -2289,11 +2289,12 @@ class Tool(ModelTools):
                                     raw.append(**right_node.get_attributes())
                         if raw:
                             yield raw
+                            
             def sort_(node_items: tuple[ServiceOrmContainer]):
                 if int_sort:
-                    return NumberSortNodesChain(model_in_sort, int_sort, node_items, reverse=reversed).sort()
+                    return NumberSortNodesChain(model_in_sort, int_sort, node_items, reverse=reversed_).sort()
                 if string_sort:
-                    instance = LetterSortNodesChain(model_in_sort, string_sort, node_items, reverse=reversed)
+                    instance = LetterSortNodesChain(model_in_sort, string_sort, node_items, reverse=reversed_)
                     if by_alphabet:
                         return instance.sort_by_alphabet()
                     if by_length:
