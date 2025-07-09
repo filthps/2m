@@ -171,7 +171,7 @@ class LinkedList:
         node.next = first_elem
         first_elem.prev = node
         node.index = first_elem.index
-        self.__incr_indexes(first_elem)
+        self.__reset_indexes()
         return node
 
     def replace(self, old_node: LinkedListItem, new_node: LinkedListItem):
@@ -232,7 +232,7 @@ class LinkedList:
             self._head = next_item
             if next_item is None:
                 self._tail = None
-            self.__decr_indexes(next_item)
+            self.__reset_indexes()
             return current_item
         current_item = self.__forward_move(index)
         prev_item = current_item.prev() if current_item.prev is not None else None
@@ -242,7 +242,7 @@ class LinkedList:
             prev_item.next = next_item
         else:
             self._head = self._tail = next_item
-        self.__decr_indexes(next_item)
+        self.__reset_indexes()
         return current_item
 
     def __iter__(self):
@@ -368,25 +368,26 @@ class LinkedList:
         right_item = right_item() if hasattr(right_item, "__call__") else right_item  # Check item is WeakRef
         right_item.prev = left_item
 
-    def __forward_move(self, index=-1):
+    def __forward_move(self, index=0):
         element = self._head
-        for _ in range(self._support_negative_index(index)):
+        if element is None:
+            return
+        if element.index == index:
+            return element
+        for _ in range(self._support_negative_index(index) + 1):
             next_element = element.next
             if next_element is None:
                 raise IndexError
             element = next_element
-        return element
+            if element.index == index:
+                return element
 
-    @staticmethod
-    def __incr_indexes(node):
+    def __reset_indexes(self):
+        counter = 0
+        node = self._head
         while node is not None:
-            node.index += 1
-            node = node.next
-
-    @staticmethod
-    def __decr_indexes(node):
-        while node is not None:
-            node.index -= 1
+            node.index = counter
+            counter += 1
             node = node.next
 
     @staticmethod
