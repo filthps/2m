@@ -128,7 +128,7 @@ class TestLinkedList(unittest.TestCase):
 
     def test_getitem(self):
         linked_list = LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3},
-                                  {"node3_val": 4}, {"node4_val": 5}])
+                                  {"node4_val": 4}, {"node5_val": 5}])
         linked_list.__getitem__(4)
         linked_list[1]
         linked_list[-2]
@@ -144,6 +144,10 @@ class TestLinkedList(unittest.TestCase):
             linked_list[None]
             linked_list[False]
             linked_list[True]
+        self.assertEqual(1, linked_list[0].value["node_val"])
+        self.assertEqual(2, linked_list[1].value["nod2_val"])
+        self.assertEqual(3, linked_list[2].value["node3_val"])
+        self.assertEqual(4, linked_list[3].value["node4_val"])
 
     def test_getitem_slice(self):
         linked_list = LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3},
@@ -328,7 +332,6 @@ class TestToolItemQueue(unittest.TestCase):
 
     def test_init(self):
         Queue()
-        queue = Queue()
         data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
                  "_delete": False, "_create_at": datetime.datetime.now(), 
                  "machinename": "Test", "machineid": 1},
@@ -929,13 +932,13 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Ставим в столбец отношения внешнего ключа значение, чьего PK не существует
         # тогда будет взята связка из базы данных! с прежним pk-fk
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
-        self.assertEqual(2, result.__len__())
+        self.assertEqual(4, result.__len__())
         self.assertEqual(result.items[0]["Cnc"]["cncid"], 1, result.items[0]["Machine"]["cncid"])
         self.assertEqual(result.items[0]["Cnc"]["name"], "NC210")  # Из базы
         self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")  # Тоже из базы
         self.orm_manager.set_item(Machine, machinename="Heller", cncid=2, _update=True)  # найдётся по столбцу machinename, потому что (unique constraint)
         # Изначально было 2 связки, но так как 1 разрушили, то осталась всего одна
-        self.assertEqual(1, result.__len__())
+        self.assertEqual(3, result.__len__())
         self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
         self.assertEqual(result.items[0]["Cnc"]["name"], "Ram")
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)
@@ -986,31 +989,27 @@ class TestToolHelper(unittest.TestCase, SetUp):
     def test_join_select__has_changes(self):
         """ Метод has_changes класса JoinSelectResult принимает в качестве аргумента хеш-сумму от одного контейнера
         со связанными моделями. """
-        self.set_data_into_queue()
         self.set_data_into_database()
-        join_select_result = self.orm_manager.join_select(Machine, Cnc, _on={"Machine.machineid": "Cnc.cncid"})
-        #  Первый запрос has_changes всегда вернёт None
-        self.assertFalse(join_select_result.has_changes())  # Для всей выборки результатов (не указан хеш)
-        invalid_hash = 34535566543  # Совершенно постороннее значение, взятое с потолка
-        self.assertIsNone(join_select_result.has_changes(invalid_hash))  # Для всей выборки результатов (не указан хеш)
-        self.update_exists_items()
-        self.assertTrue(join_select_result.has_changes())
+        self.set_data_into_queue()
+        join_select_result = self.orm_manager.join_select(Machine, Cnc, _on={"Machine.cncid": "Cnc.cncid"})
         self.assertFalse(join_select_result.has_changes())
-        self.assertFalse(join_select_result.has_changes())
-        val_from_0 = join_select_result.items[0].__hash__()
-        val_from_1 = hash(join_select_result.items[1])
         self.orm_manager.set_item(_model=Cnc, name="name_n", _update=True, cncid=1)
         self.assertTrue(join_select_result.has_changes())
+        hash_value_from_0_index = join_select_result[0].__hash__()  # Хеш-сумма от пары, которая изменится строкой ниже
+        hash_value_from_2_index = join_select_result[2].hash_by_pk  # Хеш-сумма от пары, которая не изменялась, должен вернуться False
         self.orm_manager.set_item(_model=Machine, _update=True, machinename="name", machineid=1)
+        self.assertFalse(join_select_result.has_changes(hash_value_from_2_index))
+        self.assertTrue(join_select_result.has_changes(hash_value_from_0_index))
         self.orm_manager.set_item(_model=Cnc, name="name_n", _update=True, commentsymbol="#")
+        self.assertTrue(join_select_result.has_changes())
         self.orm_manager.set_item(_model=Cnc, name="naаке", _update=True, cncid=2)
-        self.assertTrue(join_select_result.has_changes(val_from_0))
-        self.assertTrue(join_select_result.has_changes(val_from_1))
+        self.assertTrue(join_select_result.has_changes())
         self.assertFalse(join_select_result.has_changes())
-        self.assertFalse(join_select_result.has_changes(val_from_1))
-        self.assertFalse(join_select_result.has_changes(val_from_0))
-        invalid_hash_1 = 345352340678  # Совершенно постороннее значение, взятое с потолка
-        self.assertIsNone(join_select_result.has_changes(hash_value=invalid_hash_1))  # Для всей выборки результатов (не указан хеш)
+        # Добавить новую связку, которой не было в результатах ранее
+        self.orm_manager.set_item(Cnc, name="testname", _insert=True, cncid=21)
+        self.orm_manager.set_item(Machine, machinename="Somenamef", machineid=20, _insert=True, cncid=21)
+        self.assertTrue(join_select_result.has_changes())
+        self.assertFalse(join_select_result.has_changes())
 
     @drop_cache
     @db_reinit
@@ -1023,8 +1022,19 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertFalse(result.has_new_entries())
         self.assertFalse(result.has_new_entries())
         self.orm_manager.set_item(_model=Numeration, _insert=True, numerationid=2)
+        other_result = self.orm_manager.get_items(_model=Machine)
+        self.assertFalse(other_result)
         self.assertTrue(result.has_new_entries())
         self.assertFalse(result.has_new_entries())
+        self.set_data_into_queue()
+        self.assertTrue(other_result.has_new_entries())
+        self.assertFalse(other_result.has_new_entries())
+        self.assertTrue(result)
+        self.set_data_into_database()
+        self.assertFalse(other_result.has_new_entries())  # False потому что были станки с id с 1 по 4 в локальных нодах. Остались те же
+        self.assertTrue(other_result.has_changes())  # Но изменения есть! Тк столбцы изменились
+        self.assertFalse(other_result.has_changes())
+        self.assertFalse(other_result.has_new_entries())
 
     @drop_cache
     @db_reinit
@@ -1048,6 +1058,8 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertFalse(result.has_new_entries())
         # Разъединим связь machineid==1 и cncid=1 и убедимся, что появились изменения
         self.orm_manager.set_item(_model=Machine, machineid=1, _update=True, cncid=None)
+        self.assertTrue(result.has_new_entries())
+        self.set_data_into_database()
         self.assertTrue(result.has_new_entries())
 
 
