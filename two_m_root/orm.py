@@ -28,7 +28,7 @@ from weakref import ref
 from typing import Union, Iterator, Iterable, Optional, Literal, Type, Any
 from collections import ChainMap
 from pymemcache.client.base import PooledClient
-from sqlalchemy import create_engine, delete, insert, update, text
+from sqlalchemy import create_engine, delete, insert, update, text, or_
 from sqlalchemy.sql.expression import func, desc
 from sqlalchemy.sql.dml import Insert, Update, Delete
 from sqlalchemy.orm import Query, sessionmaker as session_factory, scoped_session
@@ -2941,24 +2941,38 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                     if has_value:
                         break
 
-        def filter_relationship(database_data, local_data):
+        def filter_relationship(database_data: list[ServiceOrmContainer], local_data: list[ServiceOrmContainer]):
             """ Если среди локальных элементов разорвана связь, которая есть среди связок из базы данных,
-             то нужно удалить такую связь из результатов. """
+             то нужно удалить такую связь из результатов.
+             Изменить входящие последовательности. """
             def replace_invalid_foreign_key_from_local_to_database_if_exists():
-                """ Если в качестве значения внешнего ключа выступает значение, нода с первичным ключом от которого, """
+                """ Если в качестве значения внешнего ключа выступает значение, нода с первичным ключом от которого не найдена,
+                то оборвать эту связку.
+                 Если некорректное значение внешнего ключа указано у локальной ноды, то нужно попытаться запросить запись с таким первичным ключом у БД.
+                 Если у бд такой записи нет, то оборвать эту связь.
+                """
+                def collect_all_invalid_relationship(node_data):
+                    for index, group in enumerate(node_data):
+                        if len(group) == 1:
+                            yield index, group[0]
 
-            def collect_all_relationship(node_data):
-                for main_node, current_items_group in get_main_nodes(node_data):
-                    other_nodes_in_group = current_items_group - main_node
-                    yield other_nodes_in_group
+                def get_request_where_clause_inner(node_data):
+                    """ Создать словарь эквивалентный содержимому для выражения WHERE. """
+                    where = {}
+                    main_items = tuple(get_main_nodes(node_data))
+                    for index, node in collect_all_invalid_relationship(node_data):
+                        where_model = where.get(node.model.__name__, {})
+                        for foreign_key_column in ModelTools.get_foreign_key_columns(node.model):
+                            if main_items[index][0].get_primary_key_and_value(only_value=True) == node.value[foreign_key_column]:
+                                where_model.update({main_items[index][0].get_primary_key_and_value(only_key=True): node.value[foreign_key_column]})
+                        if node.model.__name__ not in where:
+                            where.update({node.model.__name__: where_model})
+                    return where
 
-            local_hashed_items = {group.hash_by_pk: group for group in local_data}
-
-            for database_items in database_data:
-                primary_key_hash_database_items = database_items.hash_by_pk
-                if local_hashed_items.get(primary_key_hash_database_items, None) is None:
-                    for node in database_items:
-                        ...
+                where_items = get_request_where_clause_inner(local_data)
+                if not where_items:
+                    return
+                # Создать запрос через OR (используя функцию из join_select)
 
         def merge(db_items, local_items_):
             """
