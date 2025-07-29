@@ -2080,8 +2080,7 @@ class Tool(ModelTools):
     def join_select(cls, *models: Iterable[CustomModel], _on: Optional[dict] = None,
                     _db_only=False, _queue_only=False, **where) -> "JoinSelectResult":
         """
-        join_select(model_a, model,b, on={model_b: 'model_a.column_name'})
-
+        join_select(model_a, model,b, on={model_b.column_name: 'model_a.column_name'}).
         :param where: modelName: {column_name: some_val}
         :param _on: modelName.column1: modelName2.column2
         :param _db_only: извлечь только sql inner join
@@ -2261,21 +2260,25 @@ class Tool(ModelTools):
                                int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                                by_length=False, by_alphabet=False, by_create_time=False,
                                reversed_=False, model_in_sort=None) -> Iterator[ServiceOrmContainer]:
-            def collect_node_values(on_keys_or_values: Union[dict.keys, dict.values]):
+            def collect_node_values(on_keys_or_values: Union[dict.keys, dict.values], null_values=False):
                 for node in collect_all_local_nodes():
                     for table_and_column in on_keys_or_values:
                         table, table_column = table_and_column.split(".")
                         if table == node.model.__name__:
                             if table_column in node.value:
-                                yield {node.model.__name__: node}
+                                yield node.model.__name__, node, table_column
+                            if null_values:
+                                if table_column not in node.value or node.value[table_column] is None:
+                                    yield node.model.__name__, node, table_column
 
             def compare_by_matched_fk() -> Iterator:
+                """ Получить полноценные связки нод [PK - FK]. """
                 model_left_primary_key_and_value = collect_node_values(_on.keys())  # O(u)
                 model_right_primary_key_and_value = tuple(collect_node_values(_on.values()))  # O(2u)
                 for left_data in model_left_primary_key_and_value:  # O(n)
-                    left_model_name, left_node = itertools.chain.from_iterable(left_data.items())  # O(j)
+                    left_model_name, left_node, *_ = left_data  # O(j)
                     for right_data in model_right_primary_key_and_value:  # O(k)
-                        right_model_name, right_node = itertools.chain.from_iterable(right_data.items())  # O(l)
+                        right_model_name, right_node, *_ = right_data  # O(l)
                         raw = ServiceOrmContainer()  # O(1)
                         raw.LinkedListItem = ServiceOrmItem
                         for left_table_dot_field, right_table_dot_field in _on.items():  # O(b)
@@ -2288,7 +2291,14 @@ class Tool(ModelTools):
                                     raw.append(**right_node.get_attributes())
                         if raw:
                             yield raw
-                            
+
+            def get_local_nodes_without_foreign_key_nodes():
+                """ Получить только те ноды, которые ссылаются внешним ключём на ноды, которых нету в локальном расположении. """
+                for model_name, node, column in collect_node_values(_on.keys(), null_values=True):
+                    if column not in node.value or node.value[column] is None:
+                        yield
+
+
             def sort_(node_items: tuple[ServiceOrmContainer]):
                 if int_sort:
                     return NumberSortNodesChain(model_in_sort, int_sort, node_items, reverse=reversed_).sort()
@@ -2303,15 +2313,25 @@ class Tool(ModelTools):
                 return node_items
             return sort_(tuple(compare_by_matched_fk()))
 
-        def get_db_nodes_with_null_foreign_key_value(model, foreign_key):  # todo: Подумать как сделать filter через OR, где будут перечислены все поля внешних ключей, со значением null
-            cls.is_valid_model_instance(model)
-            ModelTools.is_exists_column(model, foreign_key)
-            data = cls.connection.database.query(model).filter_by(**where, **{foreign_key: None}).all()
-            return cls.__add_single_db_result_to_queue(data, model)
+        def get_local_nodes_with_null_fk():
+            """ Получить все ноды, у которых значения столбцов с левой стороны в словаре on (в ключах) - None. """
+            data = Queue()
+            Queue.LinkedListItem = ServiceOrmItem
+            for model_name, node, column in collect_node_values(_on.keys(), null_values=True):
+                    if column not in node.value or node.value[column] is None:
+                        yield
 
+
+            data = Queue()
+            Queue.LinkedListItem = ServiceOrmItem
+            temp = cls.connection.items
+            for model_name, column in _on.keys():
+                data += temp.search_nodes({model.__name__: model for model in models}[model_name],
+                                           **where, **{column: None})
+            return data
         return JoinSelectResult(get_nodes_from_database=collect_db_data, get_local_nodes=collect_local_data,
                                 only_database=_db_only, only_local=_queue_only, get_all_local_nodes=collect_all_local_nodes,
-                                get_nodes_from_database_with_null_fk=get_db_nodes_with_null_foreign_key_value,
+                                get_nodes_from_local_with_null_fk=get_local_nodes_with_null_fk,
                                 models=models, where=where, on=_on)
 
     @classmethod
@@ -2627,12 +2647,11 @@ class BaseResult(ABC, ResultCacheTools, SliceResult):
                                                                sep="...": ...)  # Вернуть ноду по
     # входящей строке вида: 'имя_таблицы:primary_key:значение'
 
-    def __init__(self, get_nodes_from_database=None, get_local_nodes=None, get_nodes_from_database_with_null_fk=None,
+    def __init__(self, get_nodes_from_database=None, get_local_nodes=None,
                  get_all_local_nodes=None, only_local=False, only_database=False, **kwargs):
         self._get_nodes_from_database: Optional[callable] = get_nodes_from_database  # Функция, в которой происходит получение контейнера с нодами из бд
         self._get_local_nodes: Optional[callable] = get_local_nodes  # Функция, в которой происходит получение контейнера с нодами из кеша
         self._get_all_local_nodes = get_all_local_nodes
-        self._get_nodes_from_database_with_null_fk = get_nodes_from_database_with_null_fk
         self._id = self.__gen_id(**{**kwargs, "only_local": only_local, "only_database": only_database})
         self._only_queue = only_local
         self._only_db = only_database
@@ -2844,11 +2863,13 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
     """
     TEMP_HASH_PREFIX = "join_select_hash"
 
-    def __init__(self, *args, models=None, where=None, on=None, **kwargs):
+    def __init__(self, *args, models=None, where=None, on=None, get_nodes_from_local_with_null_fk=None, **kwargs):
         def is_valid():
             if not models:
                 raise ValueError
             [self.is_valid_model_instance(m) for m in models]
+            if get_nodes_from_local_with_null_fk is None:
+                raise AttributeError
             if where is not None:
                 if type(where) is not dict:
                     raise TypeError
@@ -2877,6 +2898,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                         raise ValueError
         is_valid()
         self._models = models
+        self.__get_nodes_from_local_with_null_fk = get_nodes_from_local_with_null_fk  # Для merge
         super().__init__(*args, on=on, where=where, models=models, **kwargs)
 
     @property
@@ -2942,9 +2964,51 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                         break
 
         def filter_relationship(database_data: list[ServiceOrmContainer], local_data: list[ServiceOrmContainer]):
-            """ Если среди локальных элементов разорвана связь, которая есть среди связок из базы данных,
-             то нужно удалить такую связь из результатов.
-             Изменить входящие последовательности. """
+            """ Произвести 3 манипуляции с данными:
+             1) Если db_list[(table_a -> table_b)], а local_list[table_a -> table_c],
+                 то нужно сделать запрос в базу и локалку на table C,
+                 а потом реплицировать table_c (наложить данные из локалки на данные из бд).
+                 Затем удалить table_b из db_list[i], и проверить длину db_list[i];
+                 Если длина == 1, то удалить db_list[i] целиком.
+                 Затем добавить реплицированную table_c в local[i].
+             2) Если  db_list[(table_a -> table_b)], а local_list[table_a -> None], то удалим table_b из db_list,
+                Если длина == 1, то удалить db_list[i] целиком. """
+
+            def collect_invalid_indexes(get_nodes_to_update=False, get_nodes_to_remove=False):
+                """ get_nodes_to_update - Получить те ноды, которые нужно догрузить из базы,
+                  get_nodes_to_remove - получить те ноды, которые нужно убрать,
+                  тк на стороне клиента связь PK-FK оборвана. """
+                main_nodes_db = tuple(map(lambda i: i[0], get_main_nodes(database_data)))
+                main_nodes_local = tuple(map(lambda i: i[0], get_main_nodes(local_data)))
+                for db_item_index, db_group in enumerate(database_data):
+                    current_main_db: ServiceOrmItem = main_nodes_db[db_item_index]
+                    for local_item_index, local_group in enumerate(local_data):
+                        current_main_local: ServiceOrmItem = main_nodes_local[local_item_index]
+                        if not current_main_db.hash_by_pk == current_main_local.hash_by_pk:
+                            continue
+                        db_items_map = {node.hash_by_pk: node for node in db_group}
+                        local_items_map = {node.hash_by_pk: node for node in local_group}
+                        hash_values_from_local_nodes = set(db_items_map.keys())
+                        hash_values_from_database_nodes = set(local_items_map.keys())
+                        if get_nodes_to_update:
+                            # Получить ноды, которые нужно подгрузить из базы, обновить данные (если такие записи появились)
+                            # Потом наложить сверху мои локальные данные
+                            for hash_value in hash_values_from_local_nodes - hash_values_from_database_nodes:
+                                yield db_items_map[hash_value].hash_by_pk, db_items_map[hash_value]
+                        if get_nodes_to_remove:
+                            # Получить ноды, которые нужно удалить
+                            for hash_value in hash_values_from_database_nodes - hash_values_from_local_nodes:
+                                pass
+
+
+
+
+
+
+
+
+
+
             def replace_invalid_foreign_key_from_local_to_database_if_exists():
                 """ Если в качестве значения внешнего ключа выступает значение, нода с первичным ключом от которого не найдена,
                 то оборвать эту связку.
@@ -2989,13 +3053,13 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                     yield group
             for val in local_data.values():
                 yield val
-        local_items = self.get_local_nodes()
-        all_nodes_from_database = self.get_nodes_from_database()
-        filter_relationship(all_nodes_from_database, local_items)
+        local_items = list(self.get_local_nodes())
+        all_nodes_from_database = list(self.get_nodes_from_database())
         if not local_items:
             return tuple(ResultORMCollection(item) for item in all_nodes_from_database)
         if not all_nodes_from_database:
             return tuple(ResultORMCollection(item) for item in local_items)
+        filter_relationship(all_nodes_from_database, local_items)
         return tuple(ResultORMCollection(item) for item in merge(get_main_nodes(all_nodes_from_database),
                                                                  get_main_nodes(local_items)))
 
