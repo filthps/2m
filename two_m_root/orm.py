@@ -630,6 +630,25 @@ class QueueNodeSearchTool(LinkedList):
             return False
         return self.__get_hash_value(item.model.__name__, *item.get_primary_key_and_value(as_tuple=True)) in self.__items_hash_map
 
+    def __and__(self, other):
+        if not isinstance(other, self.__class__):
+            return self.__class__()
+        result = type(self)()
+        for node in other:
+            try:
+                self.__is_valid_node(node)
+            except AttributeError:
+                return self.__class__()
+            except ValueError:
+                return self.__class__()
+            except TypeError:
+                return self.__class__()
+            value = self.__get_hash_value(node.model.__name__, *node.get_primary_key_and_value(as_tuple=True))
+            exist_node = self.__items_hash_map.get(value, None)
+            if exist_node is not None:
+                result.append(node_item=exist_node)
+        return result
+
     def __add_node(self, new_item):  # O(1)
         """ Ноде уже должен быть присвоен индекс(порядковый номер) в связанном списке, до момента вызова этого метода. """
         self.__is_valid_node(new_item)
@@ -666,10 +685,6 @@ class QueueNodeSearchTool(LinkedList):
         if not hasattr(node, "model"):
             raise AttributeError
         ModelTools.is_valid_model_instance(node.model)
-
-    def __get_slice(self, obj: slice):
-        if not isinstance(obj, slice):
-            raise TypeError
 
 
 class Queue(LinkedList):
@@ -2112,6 +2127,7 @@ class Tool(ModelTools):
                 if foreign_key not in cls.get_foreign_key_columns(models_map[left_model]):
                     raise ValueError
         is_valid()
+        tables = {table.__name__: table for table in models}
 
         def collect_db_data(offset=0, limit=float("inf"),
                             int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
@@ -2248,38 +2264,46 @@ class Tool(ModelTools):
                 for left, right in _on.items():
                     left_table, fk_column = left.split(".")
                     right_table, pk_column = right.split(".")
-                    for node in all_nodes.search_nodes(left_table, **{fk_column: "*"}):
-                        if node.value[fk_column] is None:
+                    for left_node in all_nodes.search_nodes(left_table, **{fk_column: "*"}):
+                        if left_node.value[fk_column] is None:
                             continue
-                        if not all_nodes.search_nodes(right_table, **{pk_column: node.value[fk_column]}):
-                            yield right_table, pk_column, node.value[fk_column]
+                        if not all_nodes.search_nodes(right_table, **{pk_column: left_node.value[fk_column]}):
+                            yield left_table, fk_column, right_table, pk_column, left_node.value[fk_column]
 
             def group_by_table_name(data: Iterator):
                 """ Подготовить данные для запросов в базу данных.
                 Сгруппировать разрозненные данные по ключам словаря, чтобы избежать избыточных запросов """
                 result = {}
-                for table_name, column, value in data:
+                for *_, table_name, column, value in data:
                     model_data = result.get(table_name, {})
                     column_value = model_data.get(column, [])
+                    if not column_value:
+                        model_data.update({column: column_value})
+                    if not model_data:
+                        result.update({table_name: model_data})
                     column_value.append(value)
                 return result
 
             def create_request(data: dict[dict[list]]) -> Iterator:
-                """
-                :param data: Словарь вида model_name: {column_name: value}
-                :return: r
-                """
-                tables = {table.__name__: table for table in models}
                 for model_name, column_data in data:
-                    yield cls.connection.database.query(model_name).filter(
+                    request_data = cls.connection.database.query(model_name).filter(
                         *[getattr(tables[model_name], column_name).in_(values)
-                          for column_name, values in column_data.items()]).all(), tables[model_name]
+                          for column_name, values in column_data.items()]).all()
+                    item_or_items = cls.__add_single_db_result_to_queue(request_data, tables[model_name])
+                    yield model_name, item_or_items
 
-            def create_output_collection(data: Iterator):
-                output = ServiceOrmContainer()
+            def create_output_collection(db_data: Iterator):
+                output = []
                 ServiceOrmContainer.LinkedListItem = ServiceOrmItem
-                for item, model in data:
-                    output += cls.__add_single_db_result_to_queue(item, model)
+                all_local_nodes = collect_all_local_nodes()
+                items_from_database = dict(db_data)
+                for left_table, foreign_key, right_table, primary_key, value in search_data():
+                    container = ServiceOrmContainer()
+                    left_node = all_local_nodes.get_node(tables[left_table], **{foreign_key: value})
+                    right_node = items_from_database[right_table].get_node(tables[right_table], **{primary_key: value})
+                    container.append(node_item=left_node)
+                    container.append(node_item=right_node)
+                    output.append(container)
                 return output
             request_data = search_data()
             request_data = group_by_table_name(request_data)
@@ -2288,7 +2312,7 @@ class Tool(ModelTools):
 
         def get_local_nodes_with_null_fk():
             """ Получить все ноды, у которых значения столбцов внешних ключей - null. """
-            data = Queue()
+            data = ServiceOrmContainer
             Queue.LinkedListItem = ServiceOrmItem
             for *_, node, *_ in collect_node_values(_on.keys(), null_values=True):
                 data.append(node_item=node)
@@ -2449,7 +2473,7 @@ class Tool(ModelTools):
             return {pk: value[pk]}
 
     @staticmethod
-    def __add_single_db_result_to_queue(items_db: Iterable[dict], model):
+    def __add_single_db_result_to_queue(items_db: Iterable[dict], model: CustomModel):
         """ Упаковать один или несколько результатов select к одной таблице в соответствующий контейнер. """
         result = ServiceOrmContainer()
         result.LinkedListItem = ServiceOrmItem
@@ -2888,72 +2912,19 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                     if has_value:
                         break
 
-        def filter_relationship(database_data: list[ServiceOrmContainer], local_data: list[ServiceOrmContainer]):
-            """ Произвести 3 манипуляции с данными:
-             1) Если db_list[(table_a -> table_b)], а local_list[table_a -> table_c],
-                 то нужно сделать запрос в базу и локалку на table C,
-                 а потом реплицировать table_c (наложить данные из локалки на данные из бд).
-                 Затем удалить table_b из db_list[i], и проверить длину db_list[i];
-                 Если длина == 1, то удалить db_list[i] целиком.
-                 Затем добавить реплицированную table_c в local[i].
-             2) Если  db_list[(table_a -> table_b)], а local_list[table_a -> None], то удалим table_b из db_list,
-                Если длина == 1, то удалить db_list[i] целиком. """
-
-            def collect_invalid_indexes(get_nodes_to_update=False, get_nodes_to_remove=False):
-                """ get_nodes_to_update - Получить те ноды, которые нужно догрузить из базы,
-                  get_nodes_to_remove - получить те ноды, которые нужно убрать,
-                  тк на стороне клиента связь PK-FK оборвана. """
-                main_nodes_db = tuple(map(lambda i: i[0], get_main_nodes(database_data)))
-                main_nodes_local = tuple(map(lambda i: i[0], get_main_nodes(local_data)))
-                for db_item_index, db_group in enumerate(database_data):
-                    current_main_db: ServiceOrmItem = main_nodes_db[db_item_index]
-                    for local_item_index, local_group in enumerate(local_data):
-                        current_main_local: ServiceOrmItem = main_nodes_local[local_item_index]
-                        if not current_main_db.hash_by_pk == current_main_local.hash_by_pk:
-                            continue
-                        db_items_map = {node.hash_by_pk: node for node in db_group}
-                        local_items_map = {node.hash_by_pk: node for node in local_group}
-                        hash_values_from_local_nodes = set(db_items_map.keys())
-                        hash_values_from_database_nodes = set(local_items_map.keys())
-                        if get_nodes_to_update:
-                            # Получить ноды, которые нужно подгрузить из базы, обновить данные (если такие записи появились)
-                            # Потом наложить сверху мои локальные данные
-                            for hash_value in hash_values_from_local_nodes - hash_values_from_database_nodes:
-                                yield db_items_map[hash_value].hash_by_pk, db_items_map[hash_value]
-                        if get_nodes_to_remove:
-                            # Получить ноды, которые нужно удалить
-                            for hash_value in hash_values_from_database_nodes - hash_values_from_local_nodes:
-                                pass
-
-
-            def replace_invalid_foreign_key_from_local_to_database_if_exists():
-                """ Если в качестве значения внешнего ключа выступает значение, нода с первичным ключом от которого не найдена,
-                то оборвать эту связку.
-                 Если некорректное значение внешнего ключа указано у локальной ноды, то нужно попытаться запросить запись с таким первичным ключом у БД.
-                 Если у бд такой записи нет, то оборвать эту связь.
-                """
-                def collect_all_invalid_relationship(node_data):
-                    for index, group in enumerate(node_data):
-                        if len(group) == 1:
-                            yield index, group[0]
-
-                def get_request_where_clause_inner(node_data):
-                    """ Создать словарь эквивалентный содержимому для выражения WHERE. """
-                    where = {}
-                    main_items = tuple(get_main_nodes(node_data))
-                    for index, node in collect_all_invalid_relationship(node_data):
-                        where_model = where.get(node.model.__name__, {})
-                        for foreign_key_column in ModelTools.get_foreign_key_columns(node.model):
-                            if main_items[index][0].get_primary_key_and_value(only_value=True) == node.value[foreign_key_column]:
-                                where_model.update({main_items[index][0].get_primary_key_and_value(only_key=True): node.value[foreign_key_column]})
-                        if node.model.__name__ not in where:
-                            where.update({node.model.__name__: where_model})
-                    return where
-
-                where_items = get_request_where_clause_inner(local_data)
-                if not where_items:
-                    return
-                # Создать запрос через OR (используя функцию из join_select)
+        def filter_relationship(database_data, local_data):
+            null_foreign_key_nodes = self.__get_nodes_from_local_with_null_fk()
+            for i, db_nodes_group in enumerate(database_data):
+                for node_with_null_fk in null_foreign_key_nodes:
+                    if node_with_null_fk in db_nodes_group:
+                        del db_nodes_group[i]
+            nodes_without_foreign_key = self.__get_local_nodes_without_foreign_key_nodes
+            for local_nodes_group in local_data:
+                for nodes in nodes_without_foreign_key:
+                    if local_nodes_group & nodes:
+                        local_nodes_group -= nodes
+                    if not local_nodes_group or len(local_nodes_group) == 1:
+                        local_data.remove(local_nodes_group)
 
         def merge(db_items, local_items_):
             """
