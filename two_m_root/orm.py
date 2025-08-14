@@ -29,7 +29,7 @@ from typing import Union, Iterator, Iterable, Optional, Literal, Type, Any
 from collections import ChainMap
 from pymemcache.client.base import PooledClient
 from sqlalchemy import create_engine, delete, insert, update, text, or_
-from sqlalchemy.sql.expression import func, desc, join, select
+from sqlalchemy.sql.expression import func, desc, join, select, column
 from sqlalchemy.sql.dml import Insert, Update, Delete
 from sqlalchemy.orm import Query, sessionmaker as session_factory, scoped_session
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -2135,8 +2135,7 @@ class Tool(ModelTools):
                             reversed_=False, model_in_sort=None):
             def create_request() -> str:  # O(n) * O(m)
                 if use_join:
-                    join
-                    s = f"j = join({','.join(map(lambda i: i.__name__, models))}"
+                    s = f"db.query(text(main_model)).join(models, "
                     on_keys_counter = 0
                     for left_table_dot_field, right_table_dot_field in _on.items():
                         s += f"{left_table_dot_field} == {right_table_dot_field}"
@@ -2145,7 +2144,6 @@ class Tool(ModelTools):
                             s += ", "
                     s += ")"
                     s += "\n"
-                    s += "db.query"
                 else:
                     s = f"db.query({', '.join(map(lambda x: x.__name__, models))}).filter("
                     on_keys_counter = 0
@@ -2193,8 +2191,15 @@ class Tool(ModelTools):
                         row.append(_model=join_select_result.__class__, _insert=True, **r)  # O(l)
                     yield row
             sql_text = create_request()
-            query: Query = eval(sql_text, {"db": cls.connection.database}, ChainMap(*tuple(map(lambda x: {x.__name__: x}, models)),
-                                                                                    {"select": select, "desc": desc, "func": func, "join": join}))
+            main_table = tuple(_on.keys())[0].split(".")[0]
+            tables = [model for model in models if not model.__name__ == main_table]
+            query: Query = eval(sql_text, {"db": cls.connection.database,
+                                           "text": text}, ChainMap(*tuple(map(lambda x: {x.__name__: x}, models)),
+                                                                   {"select": select, "desc": desc,
+                                                                    "func": func, "join": join,
+                                                                    "models": ", ".join(map(lambda x: f"{x.__name__}", tables)),
+                                                                    "column": column,
+                                                                    "main_model": main_table}))
             return add_joined_db_items_to_orm_queue()
 
         def collect_all_local_nodes():
@@ -2259,7 +2264,7 @@ class Tool(ModelTools):
 
         def get_local_nodes_without_foreign_key_nodes():
             """ Ноды, которые не найдены в локальном расположении """
-            def search_data():
+            def search_data() -> Iterator:
                 all_nodes = collect_all_local_nodes()
                 for left, right in _on.items():
                     left_table, fk_column = left.split(".")
@@ -2293,7 +2298,6 @@ class Tool(ModelTools):
                     yield model_name, item_or_items
 
             def create_output_collection(db_data: Iterator):
-                output = []
                 ServiceOrmContainer.LinkedListItem = ServiceOrmItem
                 all_local_nodes = collect_all_local_nodes()
                 items_from_database = dict(db_data)
@@ -2303,8 +2307,7 @@ class Tool(ModelTools):
                     right_node = items_from_database[right_table].get_node(tables[right_table], **{primary_key: value})
                     container.append(node_item=left_node)
                     container.append(node_item=right_node)
-                    output.append(container)
-                return output
+                    yield container
             request_data = search_data()
             request_data = group_by_table_name(request_data)
             node_data = create_request(request_data)
@@ -2314,7 +2317,7 @@ class Tool(ModelTools):
             """ Получить все ноды, у которых значения столбцов внешних ключей - null. """
             data = ServiceOrmContainer
             Queue.LinkedListItem = ServiceOrmItem
-            for *_, node, *_ in collect_node_values(_on.keys(), null_values=True):
+            for _, node, *_ in collect_node_values(_on.keys(), null_values=True):
                 data.append(node_item=node)
             return data
         return JoinSelectResult(models=models, only_database=_db_only, only_local=_queue_only,
@@ -2918,13 +2921,15 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                 for node_with_null_fk in null_foreign_key_nodes:
                     if node_with_null_fk in db_nodes_group:
                         del db_nodes_group[i]
-            nodes_without_foreign_key = self.__get_local_nodes_without_foreign_key_nodes
-            for local_nodes_group in local_data:
-                for nodes in nodes_without_foreign_key:
-                    if local_nodes_group & nodes:
-                        local_nodes_group -= nodes
+            nodes_without_foreign_key = tuple(self.__get_local_nodes_without_foreign_key_nodes())
+            for index, local_nodes_group in enumerate(local_data):
+                for nodes_group in nodes_without_foreign_key:
+                    if local_nodes_group & nodes_group:
+                        local_nodes_group -= nodes_group
                     if not local_nodes_group or len(local_nodes_group) == 1:
-                        local_data.remove(local_nodes_group)
+                        local_data[index] = nodes_group
+                    else:
+                        local_nodes_group += nodes_group
 
         def merge(db_items, local_items_):
             """
@@ -2960,7 +2965,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
                 return node
 
     def __is_valid(self):
-        if not self.models:
+        if not self._models:
             raise ValueError
         [self.is_valid_model_instance(m) for m in self._models]
         if not callable(self.__get_nodes_from_local_with_null_fk):
