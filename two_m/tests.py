@@ -806,7 +806,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.set_data_into_database()
         self.set_data_into_queue()
         # Возвращает ли метод экземпляр класса JoinSelectResult?
-        self.assertIsInstance(self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}), JoinSelectResult)
+        self.assertIsInstance(self.orm_manager.join_select(Machine, Cnc, _on={"Machine.cncid": "Cnc.cncid"}), JoinSelectResult)
         # GOOD (хороший случай)
         # Найдутся ли записи с pk равными значениям, которые мы добавили
         # Machine - Cnc
