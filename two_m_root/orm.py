@@ -2135,36 +2135,30 @@ class Tool(ModelTools):
                             reversed_=False, model_in_sort=None):
             def create_request() -> str:  # O(n) * O(m)
                 if use_join:
-                    s = f"db.query(text(main_model)).join(models, "
-                    on_keys_counter = 0
-                    for left_table_dot_field, right_table_dot_field in _on.items():
+                    s = "select(text(main_model)).join(models, "
+                    for index, data in enumerate(_on.items()):
+                        left_table_dot_field, right_table_dot_field = data
                         s += f"{left_table_dot_field} == {right_table_dot_field}"
-                        on_keys_counter += 1
-                        if not on_keys_counter == len(_on):
+                        if not index == len(_on) - 1:
                             s += ", "
                     s += ")"
-                    s += "\n"
                 else:
                     s = f"db.query({', '.join(map(lambda x: x.__name__, models))}).filter("
-                    on_keys_counter = 0
-                    for left_table_dot_field, right_table_dot_field in _on.items():  # O(n)
+                    for index, left_table_dot_field, right_table_dot_field in enumerate(_on.items()):  # O(n)
                         s += f"{left_table_dot_field} == {right_table_dot_field}"
-                        on_keys_counter += 1
-                        if not on_keys_counter == len(_on):
+                        if not index == len(_on) - 1:
                             s += ", "
                     s += ")"
                 s += f".offset({offset})" if offset is not None else ""
                 s += f".limit({limit})" if limit is not None else ""
                 if where:
-                    on_keys_counter = 0
                     s += f".filter("
-                    for table_name, column_and_value in where.items():
+                    for i, table_name, column_and_value in enumerate(where.items()):
                         for left_table_and_column, right_table_and_column in column_and_value.items():  # O(t)
                             s += f"{table_name}.{left_table_and_column} == '{right_table_and_column}'"
-                            if on_keys_counter < len(where) - 1:  # O(1)
+                            if i < len(where) - 1:  # O(1)
                                 s += ", "
-                            on_keys_counter += 1
-                        s += ")" if on_keys_counter == where.__len__() else ""
+                        s += ")" if i == where.__len__() - 1 else ""
                 if model_in_sort:
                     if by_length:
                         s += f".order_by("
@@ -2194,12 +2188,15 @@ class Tool(ModelTools):
             main_table = tuple(_on.keys())[0].split(".")[0]
             tables = [model for model in models if not model.__name__ == main_table]
             query: Query = eval(sql_text, {"db": cls.connection.database,
-                                           "text": text}, ChainMap(*tuple(map(lambda x: {x.__name__: x}, models)),
-                                                                   {"select": select, "desc": desc,
-                                                                    "func": func, "join": join,
-                                                                    "models": ", ".join(map(lambda x: f"{x.__name__}", tables)),
-                                                                    "column": column,
-                                                                    "main_model": main_table}))
+                                           "text": text,
+                                           }, {
+                                                **ChainMap(*tuple(map(lambda x: {x.__name__: x}, models))),
+                                                "select": select, "desc": desc,
+                                               "func": func, "join": join,
+                                               "models": ", ".join(map(lambda x: x.__name__, tables)),
+                                               "column": column,
+                                               "main_model": main_table
+                                                           })
             return add_joined_db_items_to_orm_queue()
 
         def collect_all_local_nodes():
