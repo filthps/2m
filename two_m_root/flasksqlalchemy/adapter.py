@@ -23,9 +23,12 @@ class ModelController(AbstractModelController):
                         f"Не удалось инциализировать класс-модель {cls.__name__}. "
                         f"Атрибут {special_word} использовать нельзя, тк он зарезервирован."
                     )
+                for name in cls.__dict__:
+                    if "___" in name:
+                        raise AttributeError("Тройное нижнее подчёркивание является зарезервированным для имён столбцов.")
 
         def collect_column_attributes():
-            """ Собрать в атрибут класса column_names все имена стоблцов таблицы """
+            """ Собрать в атрибут класса column_names все имена столбцов таблицы """
             column_names = cls.column_names
             for value in cls.__dict__.values():
                 if type(value) is InstrumentedAttribute and hasattr(value.expression, "name"):
