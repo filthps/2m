@@ -104,7 +104,7 @@ class SetUp:
         self.orm_manager.set_item(_model=Cnc, _insert=True, cncid=2, name="Ram", commentsymbol="#")
         self.orm_manager.set_item(_model=Cnc, _insert=True, cncid=1, name="Newcnc", commentsymbol="!")
         self.orm_manager.set_item(_model=Machine, machineid=2, cncid=2, machinename="Fidia", inputcatalog=r"D:\Heller",
-                                  outputcatalog=r"C:\Test", _insert=True)
+                                  outputcatalog=r"C:\Test", _update=True)
         self.orm_manager.set_item(_model=Machine, machinename="Tesm", _insert=True, machineid=1, cncid=1, inputcatalog=r"D:\Test",
                                   outputcatalog=r"C:\anef")
         self.orm_manager.set_item(_model=Machine, machinename="65A90", _insert=True, inputcatalog=r"D:\Test",
@@ -801,17 +801,57 @@ class TestToolHelper(unittest.TestCase, SetUp):
 
     @drop_cache
     @db_reinit
-    def test_join_select(self):
+    def test_join_select_merge(self):
+        self.set_data_into_database()
+        self.set_data_into_queue()
+        result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"})
+        # Провокационный момент:
+        # Ставим в столбец отношения внешнего ключа значение, чьего PK не существует
+        # тогда будет взята связка из базы данных! с прежним pk-fk
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
+        self.assertEqual(4, result.__len__())
+        self.assertEqual(result.items[0]["Cnc"]["cncid"], 1, result.items[0]["Machine"]["cncid"])
+        self.assertEqual(result.items[0]["Cnc"]["name"], "NC210")  # Из базы
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")  # Тоже из базы
+        self.orm_manager.set_item(Machine, machinename="Heller", cncid=2, _update=True)  # найдётся по столбцу machinename, потому что (unique constraint)
+        # Изначально было 2 связки, но так как 1 разрушили, то осталась всего одна
+        self.assertEqual(3, result.__len__())
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
+        self.assertEqual(result.items[0]["Cnc"]["name"], "Ram")
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)
+        self.assertEqual(1, result.__len__())
+        self.orm_manager.set_item(Machine, cncid=2, machineid=2, _update=True)  # Восстановили связь, теперь снова 2 связки в результатах
+        self.assertEqual(2, len(result))
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
+        self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)  # Ничего не должно измениться
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)  # Ничего не должно измениться
+        self.assertEqual(2, len(result))
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
+        self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
+        # Нарушить связь PK - FK
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")  # Теперь убедимся, что видим результат из базы данных,
+        # потому как cncid == 9 не существует ни в результатах из базы, ни в локальных результатах
+        self.assertEqual(result.items[0]["Cnc"]["name"], "NC210")
+
+    @drop_cache
+    @db_reinit
+    def test_join_select__join_select_option(self):
         # Добавить в базу и кеш данные
         self.set_data_into_database()
         self.set_data_into_queue()
         # Возвращает ли метод экземпляр класса JoinSelectResult?
-        self.assertIsInstance(self.orm_manager.join_select(Machine, Cnc, _on={"Machine.cncid": "Cnc.cncid"}), JoinSelectResult)
+        self.assertIsInstance(self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, use_join=True),
+                              JoinSelectResult)
         # GOOD (хороший случай)
         # Найдутся ли записи с pk равными значениям, которые мы добавили
         # Machine - Cnc
-        result = self.orm_manager.join_select(Machine, Cnc, _on={"Machine.cncid": "Cnc.cncid"})
+        result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"},
+                                              use_join=True)
+        result.order_by(Machine, by_column_name="machinename", decr=True)
         self.assertEqual("Newcnc", result.items[0]["Cnc"]["name"])
+        self.assertEqual(1, result.items[0]["Cnc"]["cncid"])
         self.assertEqual("Tesm", result.items[0]["Machine"]["machinename"])
         self.assertEqual("Ram", result.items[1]["Cnc"]["name"])
         self.assertEqual("Fidia", result.items[1]["Machine"]["machinename"])
@@ -821,7 +861,8 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Numeration - Operationdelegation
         #
         result = self.orm_manager.join_select(OperationDelegation, Numeration,
-                                              _on={"OperationDelegation.numerationid": "Numeration.numerationid"})
+                                              _on={"Numeration.numerationid": "OperationDelegation.numerationid"},
+                                              use_join=True)
         self.assertEqual("Нумерация. Добавил сразу в БД", result.items[0]["OperationDelegation"]["operationdescription"])
         self.assertNotEqual("Нумерация. Добавил сразу в БД", result.items[1]["OperationDelegation"]["operationdescription"])
         self.assertEqual("Нумерация кадров", result.items[1]["OperationDelegation"]["operationdescription"])
@@ -830,7 +871,8 @@ class TestToolHelper(unittest.TestCase, SetUp):
         #
         # Comment - OperationDelegation
         #
-        result = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"})
+        result = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"},
+                                              use_join=True)
         self.assertEqual("test_string_set_from_queue", result.items[1]["Comment"]["findstr"])
         self.assertNotEqual("test_string_set_from_queue", result.items[0]["Comment"]["findstr"])
         self.assertEqual("test_str", result.items[0]["Comment"]["findstr"])
@@ -844,21 +886,25 @@ class TestToolHelper(unittest.TestCase, SetUp):
         #
         # Machine - Cnc
         #
-        local_data = self.orm_manager.join_select(Machine, Cnc, _on={"Machine.cncid": "Cnc.cncid"}, _queue_only=True)
-        database_data = self.orm_manager.join_select(Cnc, Machine, _on={"Cnc.cncid": "Machine.cncid"}, _db_only=True)
+        local_data = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"},
+                                                  _queue_only=True, use_join=True)
+        database_data = self.orm_manager.join_select(Cnc, Machine, _on={"Cnc.cncid": "Machine.cncid"},
+                                                     _db_only=True, use_join=True)
         self.assertEqual(local_data.items[0]["Machine"]["cncid"], local_data.items[0]["Cnc"]["cncid"])
         self.assertEqual(database_data.items[0]["Cnc"]["cncid"], database_data.items[0]["Machine"]["cncid"])
         self.assertIn("machineid", local_data.items[0]["Machine"])
         self.assertIn("machineid", database_data.items[0]["Machine"])
         self.assertNotEqual(local_data.items[0]["Machine"]["machinename"], database_data.items[0]["Machine"]["machinename"])
-        self.assertEqual("Tesm", local_data.items[1]["Machine"]["machinename"])
-        self.assertEqual("Ram", local_data.items[0]["Cnc"]["name"])
+        self.assertEqual("Fidia", local_data.items[1]["Machine"]["machinename"])
+        self.assertEqual("Newcnc", local_data.items[0]["Cnc"]["name"])
         self.assertNotEqual(local_data.items[0]["Cnc"]["name"], database_data.items[0]["Cnc"]["name"])
         #
         # Comment - OperationDelegation
         #
-        local_data = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"}, _queue_only=True)
-        database_data = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"}, _db_only=True)
+        local_data = self.orm_manager.join_select(Comment, OperationDelegation, use_join=True,
+                                                  _on={"Comment.commentid": "OperationDelegation.commentid"}, _queue_only=True)
+        database_data = self.orm_manager.join_select(Comment, OperationDelegation, use_join=True,
+                                                     _on={"Comment.commentid": "OperationDelegation.commentid"}, _db_only=True)
         self.assertNotEqual(local_data.items[0]["Comment"]["commentid"], database_data.items[0]["Comment"]["commentid"])
         self.assertEqual(local_data.items[0]["Comment"]["commentid"], local_data.items[0]["OperationDelegation"]["commentid"])
         self.assertEqual(database_data.items[0]["Comment"]["commentid"], database_data.items[0]["OperationDelegation"]["commentid"])
@@ -869,7 +915,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertRaises(InvalidModel, self.orm_manager.join_select, "str", Machine, _on={"Cnc.cncid": "Machine.cncid"})
         self.assertRaises(InvalidModel, self.orm_manager.join_select, Machine, 5, _on={"Cnc.cncid": "Machine.cncid"})
         self.assertRaises(InvalidModel, self.orm_manager.join_select, Machine, "str", _on={"Cnc.cncid": "Machine.cncid"})
-        self.assertRaises(InvalidModel, self.orm_manager.join_select, "str", object())
+        self.assertRaises((ValueError, InvalidModel,), self.orm_manager.join_select, "str", object())
         #
         # invalid named on...
         #
@@ -924,39 +970,71 @@ class TestToolHelper(unittest.TestCase, SetUp):
 
     @drop_cache
     @db_reinit
-    def test_join_select_merge(self):
+    def test_join_select__non_join_select_option(self):
+        # Добавить в базу и кеш данные
         self.set_data_into_database()
         self.set_data_into_queue()
-        result = self.orm_manager.join_select(Machine, Cnc, _on={"Machine.cncid": "Cnc.cncid"})
-        # Провокационный момент:
-        # Ставим в столбец отношения внешнего ключа значение, чьего PK не существует
-        # тогда будет взята связка из базы данных! с прежним pk-fk
-        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
-        self.assertEqual(4, result.__len__())
-        self.assertEqual(result.items[0]["Cnc"]["cncid"], 1, result.items[0]["Machine"]["cncid"])
-        self.assertEqual(result.items[0]["Cnc"]["name"], "NC210")  # Из базы
-        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")  # Тоже из базы
-        self.orm_manager.set_item(Machine, machinename="Heller", cncid=2, _update=True)  # найдётся по столбцу machinename, потому что (unique constraint)
-        # Изначально было 2 связки, но так как 1 разрушили, то осталась всего одна
-        self.assertEqual(3, result.__len__())
-        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
-        self.assertEqual(result.items[0]["Cnc"]["name"], "Ram")
-        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)
-        self.assertEqual(1, result.__len__())
-        self.orm_manager.set_item(Machine, cncid=2, machineid=2, _update=True)  # Восстановили связь, теперь снова 2 связки в результатах
-        self.assertEqual(2, len(result))
-        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
-        self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
-        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)  # Ничего не должно измениться
-        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)  # Ничего не должно измениться
-        self.assertEqual(2, len(result))
-        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
-        self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
-        # Нарушить связь PK - FK
-        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
-        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")  # Теперь убедимся, что видим результат из базы данных,
-        # потому как cncid == 9 не существует ни в результатах из базы, ни в локальных результатах
-        self.assertEqual(result.items[0]["Cnc"]["name"], "NC210")
+        # Возвращает ли метод экземпляр класса JoinSelectResult?
+        self.assertIsInstance(self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, use_join=False),
+                              JoinSelectResult)
+        # GOOD (хороший случай)
+        # Найдутся ли записи с pk равными значениям, которые мы добавили
+        # Machine - Cnc
+        result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, use_join=False)
+        self.assertEqual("Newcnc", result.items[0]["Cnc"]["name"])
+        self.assertEqual("Tesm", result.items[0]["Machine"]["machinename"])
+        self.assertEqual("Ram", result.items[1]["Cnc"]["name"])
+        self.assertEqual("Fidia", result.items[1]["Machine"]["machinename"])
+        self.assertNotEqual(result.items[0]["Cnc"]["cncid"], result.items[1]["Cnc"]["cncid"])
+        self.assertEqual(result.items[0]["Cnc"]["cncid"], result.items[0]["Machine"]["cncid"])
+        #
+        # Numeration - Operationdelegation
+        #
+        result = self.orm_manager.join_select(OperationDelegation, Numeration,
+                                              _on={"Numeration.numerationid": "OperationDelegation.numerationid"}, use_join=False)
+        self.assertEqual("Нумерация. Добавил сразу в БД", result.items[0]["OperationDelegation"]["operationdescription"])
+        self.assertNotEqual("Нумерация. Добавил сразу в БД", result.items[1]["OperationDelegation"]["operationdescription"])
+        self.assertEqual("Нумерация кадров", result.items[1]["OperationDelegation"]["operationdescription"])
+        self.assertEqual(result.items[0]["Numeration"]["numerationid"], 1)
+        self.assertEqual(269, result.items[1]["Numeration"]["endat"])
+        #
+        # Comment - OperationDelegation
+        #
+        result = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"},
+                                              use_join=False)
+        self.assertEqual("test_string_set_from_queue", result.items[1]["Comment"]["findstr"])
+        self.assertNotEqual("test_string_set_from_queue", result.items[0]["Comment"]["findstr"])
+        self.assertEqual("test_str", result.items[0]["Comment"]["findstr"])
+        self.assertNotEqual("test_str", result.items[1]["Comment"]["findstr"])
+        self.assertEqual(result.items[0]["Comment"]["iffullmatch"], True)
+        self.assertNotIn("iffullmatch", result.items[1]["Comment"])
+        self.assertEqual(True, result.items[1]["Comment"]["ifcontains"])
+        self.assertFalse(result.items[0]["Comment"]["ifcontains"])
+        #
+        # Отбор только из локальных данных (очереди), но в базе данных их пока что быть не должно
+        #
+        # Machine - Cnc
+        #
+        local_data = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _queue_only=True, use_join=False)
+        database_data = self.orm_manager.join_select(Cnc, Machine, _on={"Cnc.cncid": "Machine.cncid"}, _db_only=True, use_join=False)
+        self.assertEqual(local_data.items[0]["Machine"]["cncid"], local_data.items[0]["Cnc"]["cncid"])
+        self.assertEqual(database_data.items[0]["Cnc"]["cncid"], database_data.items[0]["Machine"]["cncid"])
+        self.assertIn("machineid", local_data.items[0]["Machine"])
+        self.assertIn("machineid", database_data.items[0]["Machine"])
+        self.assertNotEqual(local_data.items[0]["Machine"]["machinename"], database_data.items[0]["Machine"]["machinename"])
+        self.assertEqual("Fidia", local_data.items[1]["Machine"]["machinename"])
+        self.assertEqual("Newcnc", local_data.items[0]["Cnc"]["name"])
+        self.assertNotEqual(local_data.items[0]["Cnc"]["name"], database_data.items[0]["Cnc"]["name"])
+        #
+        # Comment - OperationDelegation
+        #
+        local_data = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"},
+                                                  _queue_only=True, use_join=False)
+        database_data = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"},
+                                                     _db_only=True, use_join=False)
+        self.assertNotEqual(local_data.items[0]["Comment"]["commentid"], database_data.items[0]["Comment"]["commentid"])
+        self.assertEqual(local_data.items[0]["Comment"]["commentid"], local_data.items[0]["OperationDelegation"]["commentid"])
+        self.assertEqual(database_data.items[0]["Comment"]["commentid"], database_data.items[0]["OperationDelegation"]["commentid"])
 
     @drop_cache
     @db_reinit
@@ -991,7 +1069,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         со связанными моделями. """
         self.set_data_into_database()
         self.set_data_into_queue()
-        join_select_result = self.orm_manager.join_select(Machine, Cnc, _on={"Machine.cncid": "Cnc.cncid"})
+        join_select_result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"})
         self.assertFalse(join_select_result.has_changes())
         self.orm_manager.set_item(_model=Cnc, name="name_n", _update=True, cncid=1)
         self.assertTrue(join_select_result.has_changes())
@@ -1039,7 +1117,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
     @drop_cache
     @db_reinit
     def test_has_new_entries_join_select(self):
-        result = self.orm_manager.join_select(Cnc, Machine, _on={"Machine.cncid": "Cnc.cncid"})
+        result = self.orm_manager.join_select(Cnc, Machine, _on={"Cnc.cncid": "Machine.cncid"})
         self.assertFalse(result.has_new_entries())
         self.orm_manager.set_item(_model=Cnc, name="Test", _insert=True)
         self.orm_manager.set_item(_model=Machine, machinename="newmachine", _insert=True, machineid=1)
@@ -1082,9 +1160,10 @@ class TestResultPointer(unittest.TestCase, SetUp):
         with self.assertRaises(PointerRepeatedWrapper):
             result.pointer = list(repeat("any_s", 4))  # 1 или более повторяющихся элементов обёртки
         with self.assertRaises(PointerWrapperLengthError):
-            result.pointer = ["Станок 1", "Станок 2", "Станок 3", "Станок 4", "Станка 5 нету этот лишний"]
+            result.pointer = ["Станок 1", "Станок 2", "Станок 3", "Станок 4", "Станок 5",
+                              "Станок 6", "Станка 7 нету, этот лишний"]
         with self.assertRaises(PointerWrapperLengthError):
-            result.pointer = ["Станок 1", "Станок 2"]  # Не хватает 2 элементов в списке!
+            result.pointer = ["Станок 1", "Станок 2"]  # Не хватает 4 элементов в списке!
         with self.assertRaises(PointerWrapperLengthError):
             result.pointer = list()
         with self.assertRaises(PointerWrapperTypeError):
@@ -1095,32 +1174,36 @@ class TestResultPointer(unittest.TestCase, SetUp):
             result.pointer = b"st"
         with self.assertRaises(PointerWrapperTypeError):
             result.pointer = 0
-        result.pointer = ["Станок 1", "Станок 2", "Станок 3", "Станок 4"]  # GOOD Теперь
+        result.pointer = ["Станок 1", "Станок 2", "Станок 3", "Станок 4", "Станок 5", "Станок 6"]  # GOOD Теперь
         # До тех пор, пока не появятся новые записи, или, пока не удалится одна/несколько/все из текущих,
         # Есть возможность удобного обращения через __getitem__!
-        self.assertEqual(result.pointer.wrap_items, ["Станок 1", "Станок 2", "Станок 3", "Станок 4"])
+        self.assertEqual(result.pointer.wrap_items, ["Станок 1", "Станок 2", "Станок 3", "Станок 4",
+                                                     "Станок 5", "Станок 6"])
         self.assertIsInstance(result.pointer.items, dict)
-        self.assertEqual(4, result.pointer.items.__len__())
+        self.assertEqual(6, result.pointer.items.__len__())
         #
         # Пока мы ничего не изменяли столбцы(или не добавляли новые) отслеживаемых через Pointer() нод,
         # мы логично получим ответ False,
         # После вызова метода has_changes
         self.assertFalse(result.pointer.has_changes("Станок 1"))
         self.assertFalse(result.pointer.has_changes("Станок 3"))
+        self.assertFalse(result.pointer.has_changes("Станок 5"))
         self.assertFalse(result.pointer.has_changes("Станок 2"))
+        self.assertFalse(result.pointer.has_changes("Станок 6"))
         self.assertFalse(result.pointer.has_changes("Станок 4"))
+
         self.assertTrue(result.pointer.is_valid)
-        # А теперь изменим сами(со стороны нашего ui) первую запись, которая ассоциируется со 'Станок 1'
+        # А теперь изменим сами(со стороны нашего ui) запись, которая ассоциируется со 'Станок 3'
         self.orm_manager.set_item(Machine, machineid=2, machinename="test",
                                   _update=True)
         self.assertTrue(result.pointer.is_valid)
-        self.assertFalse(result.pointer.has_changes("Станок 3"))
         self.assertFalse(result.pointer.has_changes("Станок 2"))
-        self.assertFalse(result.pointer.has_changes("Станок 4"))
-        self.assertTrue(result.pointer.has_changes("Станок 1"))  # Как и ожидалось!!!
+        self.assertTrue(result.pointer.has_changes("Станок 3"))  # Как и ожидалось!!!
         # После появления в локальной очереди или базе данных новой записи
+        self.assertFalse(result.pointer.has_changes("Станок 4"))
+        self.assertFalse(result.pointer.has_changes("Станок 1"))
         self.orm_manager.set_item(_model=Machine, machinename="somenewmachinename", _insert=True)
-        # Экземпляр станет недействителен и станет закрыт для любого взаимодействия
+        # Строкой выше мы добавили новую запись, поэтому данный pointer больше недействителен и станет закрыт для любого взаимодействия
         # Убедимся, что экземпляр pointer "перестал со мной сотрудничать"
         self.assertIsNone(result.pointer.items)
         self.assertFalse(result.pointer)
@@ -1130,12 +1213,12 @@ class TestResultPointer(unittest.TestCase, SetUp):
         self.assertIsNone(result.pointer.has_changes("Станок 2"))
         self.assertIsNone(result.pointer.has_changes("Станок 4"))
         with self.assertRaises(KeyError):  # А вот такого вообще не было в текущем wrapper
-            self.assertIsNone(result.pointer.has_changes("Станок 5"))
+            self.assertIsNone(result.pointer.has_changes("Станок 9"))
         # С ним покончено((((
         # К счастью, текущий экземпляр result может получить новый pointer!, для этого
         # Нужно снова ассоциировать с сеттером pointer правильный кортеж(по длине) и содержимому без повторений
-        result.pointer = ["Станок 1", "Станок 2", "Станок 3", "Станок 4", "Станок 5"]
-        self.assertEqual(result.pointer["Станок 5"]["machinename"], "somenewmachinename")
+        result.pointer = ["Станок 1", "Станок 2", "Станок 3", "Станок 4", "Станок 5", "Станок 6", "Станок 7"]
+        self.assertEqual(result.pointer["Станок 7"]["machinename"], "somenewmachinename")
 
     @drop_cache
     @db_reinit
@@ -1146,12 +1229,13 @@ class TestResultPointer(unittest.TestCase, SetUp):
         """
         self.set_data_into_database()
         self.set_data_into_queue()
-        result = self.orm_manager.join_select(Machine, Cnc, _on={"Machine.cncid": "Cnc.cncid"})
-        result.pointer = ["Результат в списке 1", "Результат в списке 2"]
+        result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"})
+        result.pointer = ["Результат в списке 1", "Результат в списке 2", "Результат в списке 3", "Результат в списке 4"]
         #
         # Тест wrap_items
         #
-        self.assertEqual(result.pointer.wrap_items, ["Результат в списке 1", "Результат в списке 2"])
+        self.assertEqual(result.pointer.wrap_items, ["Результат в списке 1", "Результат в списке 2",
+                                                     "Результат в списке 3", "Результат в списке 4"])
         #
         #  Тестировать refresh
         #
