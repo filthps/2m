@@ -18,6 +18,8 @@ class AbstractModelController:
 
 
 class CustomModel(AbstractModelController):  # Нужно для аннотации
+    """ Любая модель, описанная в models.py,
+    наследуемая от следующих классов: ModelController, db.Model, GlobalFields """
     __tablename__ = ...
 
 
