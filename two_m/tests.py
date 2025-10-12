@@ -804,7 +804,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
     def test_join_select_merge(self):
         self.set_data_into_database()
         self.set_data_into_queue()
-        result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"})
+        result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, use_join=False)
         # Провокационный момент:
         # Ставим в столбец отношения внешнего ключа значение, чьего PK не существует
         # тогда будет взята связка из базы данных! с прежним pk-fk
@@ -849,7 +849,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Machine - Cnc
         result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"},
                                               use_join=True)
-        result.order_by(Machine, by_column_name="machinename", decr=True)
+        result.order_by(Machine, by_column_name="machinename", decr=False)
         self.assertEqual("Newcnc", result.items[0]["Cnc"]["name"])
         self.assertEqual(1, result.items[0]["Cnc"]["cncid"])
         self.assertEqual("Tesm", result.items[0]["Machine"]["machinename"])
@@ -981,6 +981,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Найдутся ли записи с pk равными значениям, которые мы добавили
         # Machine - Cnc
         result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, use_join=False)
+        result.order_by(Machine, by_primary_key=True, decr=True)
         self.assertEqual("Newcnc", result.items[0]["Cnc"]["name"])
         self.assertEqual("Tesm", result.items[0]["Machine"]["machinename"])
         self.assertEqual("Ram", result.items[1]["Cnc"]["name"])
@@ -990,10 +991,11 @@ class TestToolHelper(unittest.TestCase, SetUp):
         #
         # Numeration - Operationdelegation
         #
-        result = self.orm_manager.join_select(OperationDelegation, Numeration,
+        result = self.orm_manager.join_select(Numeration, OperationDelegation,
                                               _on={"Numeration.numerationid": "OperationDelegation.numerationid"}, use_join=False)
+        result.order_by(Numeration, by_primary_key=True, decr=True)
+        self.assertEqual("Нумерация кадров", result.items[1]["OperationDelegation"]["operationdescription"])
         self.assertEqual("Нумерация. Добавил сразу в БД", result.items[0]["OperationDelegation"]["operationdescription"])
-        self.assertNotEqual("Нумерация. Добавил сразу в БД", result.items[1]["OperationDelegation"]["operationdescription"])
         self.assertEqual("Нумерация кадров", result.items[1]["OperationDelegation"]["operationdescription"])
         self.assertEqual(result.items[0]["Numeration"]["numerationid"], 1)
         self.assertEqual(269, result.items[1]["Numeration"]["endat"])
@@ -1035,6 +1037,70 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertNotEqual(local_data.items[0]["Comment"]["commentid"], database_data.items[0]["Comment"]["commentid"])
         self.assertEqual(local_data.items[0]["Comment"]["commentid"], local_data.items[0]["OperationDelegation"]["commentid"])
         self.assertEqual(database_data.items[0]["Comment"]["commentid"], database_data.items[0]["OperationDelegation"]["commentid"])
+        #
+        # Плохие аргументы ...
+        # invalid model
+        #
+        self.assertRaises(InvalidModel, self.orm_manager.join_select, "str", Machine, _on={"Cnc.cncid": "Machine.cncid"})
+        self.assertRaises(InvalidModel, self.orm_manager.join_select, Machine, 5, _on={"Cnc.cncid": "Machine.cncid"})
+        self.assertRaises(InvalidModel, self.orm_manager.join_select, Machine, "str", _on={"Cnc.cncid": "Machine.cncid"})
+        self.assertRaises((ValueError, InvalidModel,), self.orm_manager.join_select, "str", object())
+        #
+        # invalid named on...
+        #
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc, _on=6)
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on=object())
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc, _on=[])
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc, _on="[]")
+        #
+        # Модели, переданные в аргументах (позиционных), не связаны с моделями и полями в именованном аргументе 'on'.
+        # join_select(a_model, b_model _on={"a_model.column_name": "b_model.column_name"})
+        #
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"InvalidModel.invalid_field": "SomeModel.other_field"})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"InvalidModel.invalid_field": "SomeModel.other_field"})
+        #
+        # Именованный параметр on содержит недействительные данные
+        #
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"invalid_field": "SomeModel.other_field"})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"InvalidModel.invalid_field": "other_field"})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"Machine.invalid_field": ".other_field"})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={".invalid_field": "SomeModel.other_field"})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"InvalidModel.invalid_field": "SomeModel."})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"InvalidModel.": "SomeModel.other_field"})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"InvalidModel.": "SomeModel."})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"InvalidModel.invalid_field": "."})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={".": "SomeModel.other_field"})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"InvalidModel.invalid_field": " "})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={" ": "SomeModel.other_field"})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"InvalidModel.invalid_field": "-"})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"InvalidModel.invalid_field": 5})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={"InvalidModel.invalid_field": 2.3})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={2.9: 5})
+        self.assertRaises((AttributeError, TypeError, ValueError,), self.orm_manager.join_select, Machine, Cnc,
+                          _on={4: "Machine.machinename"})
+
+    def test_join_select_triple_models__join_select_option(self):
+        """ Тестировать запрос с join select, в котором участвуют 3 таблицы """
+        # todo
+        ...
 
     @drop_cache
     @db_reinit
@@ -1069,7 +1135,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         со связанными моделями. """
         self.set_data_into_database()
         self.set_data_into_queue()
-        join_select_result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"})
+        join_select_result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, use_join=False)
         self.assertFalse(join_select_result.has_changes())
         self.orm_manager.set_item(_model=Cnc, name="name_n", _update=True, cncid=1)
         self.assertTrue(join_select_result.has_changes())
@@ -1713,7 +1779,7 @@ class TestSortJoinResultMixin(unittest.TestCase, SetUp):
         self.set_data_into_queue()
 
     def test_sort_by_primary_key(self):
-        query = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _db_only=True)
+        query = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _db_only=True, use_join=True)
         query.order_by(Machine, by_primary_key=True)
         query.order_by(Machine, by_primary_key=True, decr=False)
         self.assertEqual([i["Machine"]["machineid"] for i in query], [1, 2, 3, 4])
