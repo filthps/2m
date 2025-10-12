@@ -28,8 +28,8 @@ from weakref import ref
 from typing import Union, Iterator, Iterable, Optional, Literal, Type, Any
 from collections import ChainMap
 from pymemcache.client.base import PooledClient
-from sqlalchemy import create_engine, delete, insert, update, text, or_, CursorResult
-from sqlalchemy.sql.expression import func, desc, join, select, column
+from sqlalchemy import create_engine, delete, insert, update, text, CursorResult
+from sqlalchemy.sql.expression import func, desc, join, select
 from sqlalchemy.sql.dml import Insert, Update, Delete
 from sqlalchemy.orm import Query, sessionmaker as session_factory, scoped_session
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -1534,7 +1534,7 @@ class OrderByMixin(ABC):
         self._by_alphabet = alphabet
         self._by_string_length = length
         self._by_time = by_create_time
-        self._reversed = decr
+        self._reversed = not decr
         self._is_sort = True
 
     def get_nodes_from_database(self, **kwargs):
@@ -1863,6 +1863,8 @@ class PrimaryKeyFactory(ModelTools):
         name = cls.get_primary_key_column_name(model)
         pk = cls._select_primary_key_value_from_node_data(model, data)
         if pk is not None:
+            if type(pk[name]) is not ModelTools.get_primary_key_python_type(model):
+                raise NodePrimaryKeyError("Первичный ключ должен быть другого типа")
             pk_from_db = cls._get_highest_autoincrement_pk_from_database(model)
             if pk_from_db is not None:
                 if pk_from_db >= pk[name]:
@@ -2082,8 +2084,7 @@ class Tool(ModelTools):
 
         def select_from_db(offset=0, limit=float("inf"),
                            int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
-                           by_length=False, by_alphabet=False, by_create_time=False,
-                           reversed_=False, model_in_sort=None):
+                           reversed_=False):
             try:
                 items_db = cls.connection.database.query(model).offset(offset).limit(limit)
             except OperationalError:
@@ -2109,7 +2110,7 @@ class Tool(ModelTools):
 
     @classmethod
     def join_select(cls, *models: Iterable[CustomModel], _on: Optional[dict] = None,
-                    _db_only=False, _queue_only=False, use_join=True, **where) -> "JoinSelectResult":
+                    _db_only=False, _queue_only=False, _use_join=True, **where) -> "JoinSelectResult":
         """
         join_select(model_a, model,b, on={model_b.column_name: 'model_a.column_name'}).
         В ключах таблицы с внешними ключами, в values таблицы с первичными ключами.
@@ -2117,7 +2118,7 @@ class Tool(ModelTools):
         :param _on: modelName.column1: modelName2.column2
         :param _db_only: извлечь только sql inner join
         :param _queue_only: извлечь только из queue
-        :param use_join: использовать select с join или использовать подзапросы
+        :param _use_join: использовать select с join или использовать подзапросы
         :return: специальный итерируемый объект класса JoinSelectResult, который содержит смешанные данные из локального
         хранилища и БД
         """
@@ -2143,7 +2144,7 @@ class Tool(ModelTools):
                     raise ValueError
                 if foreign_key not in cls.get_foreign_key_columns(models_map[right_model]):
                     raise ValueError
-            if type(use_join) is not bool:
+            if type(_use_join) is not bool:
                 raise TypeError
         is_valid()
         tables = {table.__name__: table for table in models}
@@ -2152,83 +2153,93 @@ class Tool(ModelTools):
                             int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                             by_length=False, by_alphabet=False, by_create_time=False,
                             reversed_=False, model_in_sort=None):
-
+            """
+            Функция для извлечения данных из базы данных
+            :param offset: Левая часть среза результата
+            :param limit: Правая часть среза результата
+            :param int_sort: Сортировка значения с целым числом (False или строка-наименование столбца)
+            :param string_sort: Сортировка строки (False или строка-наименование столбца)
+            :param by_length: Сортировать строку по длине
+            :param by_alphabet: Сортировать строку в алфавитном порядке
+            :param by_create_time: Сортировать результат по столбцу даты создания
+            :param reversed_: Сортировать на убывание или возрастание
+            :param model_in_sort: Таблица, по столбцу которой происходит сортировка
+            :return:
+            """
             def create_request() -> str:  # O(n) * O(m)
-                tables_sql = {model.__name__: model.__tablename__ for model in models}
-
-                def get_column_names():
-                    """ Создать алиасы для выражения select """
-                    def column_names():
-                        for model in models:
-                            for column_name in model().column_names:
-                                yield f"{model.__tablename__}.{column_name} AS {model.__name__}___{column_name}"
-                    return tuple(column_names())
-                on = _on.copy()
-                if use_join:
-                    left_table, pk_column = tuple(on.keys())[0].split(".")[0], tuple(on.keys())[0].split(".")[1]
-                    right_table, fk_column = tuple(on.values())[0].split(".")[0], tuple(on.values())[0].split(".")[1]
-                    select_text = f"SELECT "
-                    select_text += ", ".join(get_column_names())
-                    select_text += " FROM "
-                    select_text += f"{tables_sql[left_table]} " \
-                                   f"INNER JOIN {tables_sql[right_table]} "
-                    select_text += f"ON {tables_sql[left_table]}.{pk_column} = {tables_sql[right_table]}.{fk_column} "
-                    del on[tuple(on.keys())[0]]
-                    for left_table_dot_field, right_table_dot_field in on.items():
-                        left_table, pk_column = left_table_dot_field.split(".")
-                        right_table, fk_column = right_table_dot_field.split(".")
-                        select_text += f"INNER JOIN {tables_sql[right_table]} "
-                        select_text += f"ON {tables_sql[left_table]}.{pk_column} = {tables_sql[right_table]}.{fk_column}"
-                    s = f"db.execute(text('{select_text}')"
-                    s = s.lower()
+                if _use_join:
+                    select_text = f"select(*models)"
+                    for model in models:  # O(n)
+                        if not model.__name__ == models[0].__name__:
+                            select_text += f".join({model.__name__})"
+                    select_text += ".filter("
+                    for u, data in enumerate(_on.items()):  # O(n)
+                        left, right = data
+                        left_table, pk_column = tuple(left.split("."))[0], tuple(left.split("."))[1]
+                        right_table, fk_column = tuple(right.split("."))[0], tuple(right.split("."))[1]
+                        select_text += f"{right_table}.{fk_column} == {left_table}.{pk_column}"
+                        if u < len(_on) - 1:
+                            select_text += ", "
+                    select_text += ")"
                 else:
-                    s = "db.execute(select(*models).filter("
+                    select_text = "select(*models).filter("
                     for index, data in enumerate(_on.items()):  # O(n)
                         left_table_dot_field, right_table_dot_field = data
                         left_table, fk_column = left_table_dot_field.split(".")
                         right_table, pk_column = right_table_dot_field.split(".")
-                        s += f"{tables[left_table].__name__}.{fk_column} " \
-                             f"== {tables[right_table].__name__}.{pk_column}"
+                        select_text += f"{tables[left_table].__name__}.{fk_column} " \
+                            f"== {tables[right_table].__name__}.{pk_column}"
                         if not index == len(_on) - 1:
-                            s += ", "
-                    s += ")"
-                s += f".offset({offset})" if offset is not None else ""
-                s += f".limit({limit})" if limit is not None else ""
+                            select_text += ", "
+                    select_text += ")"
+                select_text += f".offset({offset})" if offset is not None else ""
+                select_text += f".limit({limit})" if limit is not None else ""
                 if where:
-                    s += f".where("
+                    select_text += f".where("
                     for i, table_column_value in enumerate(where.items()):
                         table_name_column_name, value = table_column_value
                         table_name, column_name = table_name_column_name.split(".")
                         value = f"'{value}'" if not value.isdigit() else value
-                        s += f"{tables[table_name].__tablename__}.{column_name} == {value}"
+                        select_text += f"{tables[table_name].__name__}.{column_name} == {value}"
                         if i < len(where) - 1:
-                            s += ", "
-                    s += ")"
-                if model_in_sort:
+                            select_text += ", "
+                    select_text += ")"
+                if string_sort:
+                    select_text += ".order_by("
                     if by_length:
-                        s += f".order_by("
                         if reversed_:
-                            s += "desc("
-                        s += f"func.length({model_in_sort.__tablename__}.{int_sort or string_sort}))"
+                            select_text += "desc("
+                        select_text += f"func.length({model_in_sort.__name__}.{string_sort})"
                         if reversed_:
-                            s += ")"
+                            select_text += ")"
                     if by_alphabet:
                         if reversed_:
-                            s += "desc("
-                        s += f".order_by({model_in_sort.__tablename__}.{int_sort or string_sort})"
+                            select_text += "desc("
+                        select_text += f"{model_in_sort.__name__}.{string_sort}"
                         if reversed_:
-                            s += ")"
-                s += ")"
-                return s
+                            select_text += ")"
+                    select_text += ")"
+                if int_sort:
+                    select_text += ".order_by("
+                    if reversed_:
+                        select_text += "desc("
+                    select_text += f"{model_in_sort.__name__}.{int_sort}"
+                    if reversed_:
+                        select_text += ")"
+                    select_text += ")"
+                return f"db.execute({select_text})"
 
             def add_joined_db_items_to_orm_queue(query: CursorResult) -> Iterator[ServiceOrmContainer]:
                 for data_row in query.mappings().all():  # O(i)
                     row = ServiceOrmContainer()
                     for model in models:
                         current_node_data = {}
-                        for column_name, value in data_row.items():
-                            if column_name.startswith(str.lower(model.__name__)):
-                                current_node_data.update({column_name[column_name.index("___") + 3:]: value})
+                        for table_name, instance in data_row.items():
+                            if not instance.__tablename__ == model.__tablename__:
+                                continue
+                            total_column_names = tables[table_name]().column_names
+                            [current_node_data.update({column_name: instance.__dict__[column_name]})
+                             for column_name in total_column_names]
                         if current_node_data:
                             row.append(_model=model, _insert=True, **current_node_data)  # O(l)
                     yield row

@@ -804,7 +804,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
     def test_join_select_merge(self):
         self.set_data_into_database()
         self.set_data_into_queue()
-        result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, use_join=False)
+        result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _use_join=False)
         # Провокационный момент:
         # Ставим в столбец отношения внешнего ключа значение, чьего PK не существует
         # тогда будет взята связка из базы данных! с прежним pk-fk
@@ -842,13 +842,13 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.set_data_into_database()
         self.set_data_into_queue()
         # Возвращает ли метод экземпляр класса JoinSelectResult?
-        self.assertIsInstance(self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, use_join=True),
+        self.assertIsInstance(self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _use_join=True),
                               JoinSelectResult)
         # GOOD (хороший случай)
         # Найдутся ли записи с pk равными значениям, которые мы добавили
         # Machine - Cnc
         result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"},
-                                              use_join=True)
+                                              _use_join=True)
         result.order_by(Machine, by_column_name="machinename", decr=False)
         self.assertEqual("Newcnc", result.items[0]["Cnc"]["name"])
         self.assertEqual(1, result.items[0]["Cnc"]["cncid"])
@@ -862,7 +862,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         #
         result = self.orm_manager.join_select(OperationDelegation, Numeration,
                                               _on={"Numeration.numerationid": "OperationDelegation.numerationid"},
-                                              use_join=True)
+                                              _use_join=True)
         self.assertEqual("Нумерация. Добавил сразу в БД", result.items[0]["OperationDelegation"]["operationdescription"])
         self.assertNotEqual("Нумерация. Добавил сразу в БД", result.items[1]["OperationDelegation"]["operationdescription"])
         self.assertEqual("Нумерация кадров", result.items[1]["OperationDelegation"]["operationdescription"])
@@ -872,7 +872,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Comment - OperationDelegation
         #
         result = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"},
-                                              use_join=True)
+                                              _use_join=True)
         self.assertEqual("test_string_set_from_queue", result.items[1]["Comment"]["findstr"])
         self.assertNotEqual("test_string_set_from_queue", result.items[0]["Comment"]["findstr"])
         self.assertEqual("test_str", result.items[0]["Comment"]["findstr"])
@@ -887,9 +887,9 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Machine - Cnc
         #
         local_data = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"},
-                                                  _queue_only=True, use_join=True)
+                                                  _queue_only=True, _use_join=True)
         database_data = self.orm_manager.join_select(Cnc, Machine, _on={"Cnc.cncid": "Machine.cncid"},
-                                                     _db_only=True, use_join=True)
+                                                     _db_only=True, _use_join=True)
         self.assertEqual(local_data.items[0]["Machine"]["cncid"], local_data.items[0]["Cnc"]["cncid"])
         self.assertEqual(database_data.items[0]["Cnc"]["cncid"], database_data.items[0]["Machine"]["cncid"])
         self.assertIn("machineid", local_data.items[0]["Machine"])
@@ -901,9 +901,9 @@ class TestToolHelper(unittest.TestCase, SetUp):
         #
         # Comment - OperationDelegation
         #
-        local_data = self.orm_manager.join_select(Comment, OperationDelegation, use_join=True,
+        local_data = self.orm_manager.join_select(Comment, OperationDelegation, _use_join=True,
                                                   _on={"Comment.commentid": "OperationDelegation.commentid"}, _queue_only=True)
-        database_data = self.orm_manager.join_select(Comment, OperationDelegation, use_join=True,
+        database_data = self.orm_manager.join_select(Comment, OperationDelegation, _use_join=True,
                                                      _on={"Comment.commentid": "OperationDelegation.commentid"}, _db_only=True)
         self.assertNotEqual(local_data.items[0]["Comment"]["commentid"], database_data.items[0]["Comment"]["commentid"])
         self.assertEqual(local_data.items[0]["Comment"]["commentid"], local_data.items[0]["OperationDelegation"]["commentid"])
@@ -975,12 +975,12 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.set_data_into_database()
         self.set_data_into_queue()
         # Возвращает ли метод экземпляр класса JoinSelectResult?
-        self.assertIsInstance(self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, use_join=False),
+        self.assertIsInstance(self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _use_join=False),
                               JoinSelectResult)
         # GOOD (хороший случай)
         # Найдутся ли записи с pk равными значениям, которые мы добавили
         # Machine - Cnc
-        result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, use_join=False)
+        result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _use_join=False)
         result.order_by(Machine, by_primary_key=True, decr=True)
         self.assertEqual("Newcnc", result.items[0]["Cnc"]["name"])
         self.assertEqual("Tesm", result.items[0]["Machine"]["machinename"])
@@ -992,7 +992,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Numeration - Operationdelegation
         #
         result = self.orm_manager.join_select(Numeration, OperationDelegation,
-                                              _on={"Numeration.numerationid": "OperationDelegation.numerationid"}, use_join=False)
+                                              _on={"Numeration.numerationid": "OperationDelegation.numerationid"}, _use_join=False)
         result.order_by(Numeration, by_primary_key=True, decr=True)
         self.assertEqual("Нумерация кадров", result.items[1]["OperationDelegation"]["operationdescription"])
         self.assertEqual("Нумерация. Добавил сразу в БД", result.items[0]["OperationDelegation"]["operationdescription"])
@@ -1003,7 +1003,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Comment - OperationDelegation
         #
         result = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"},
-                                              use_join=False)
+                                              _use_join=False)
         self.assertEqual("test_string_set_from_queue", result.items[1]["Comment"]["findstr"])
         self.assertNotEqual("test_string_set_from_queue", result.items[0]["Comment"]["findstr"])
         self.assertEqual("test_str", result.items[0]["Comment"]["findstr"])
@@ -1017,8 +1017,8 @@ class TestToolHelper(unittest.TestCase, SetUp):
         #
         # Machine - Cnc
         #
-        local_data = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _queue_only=True, use_join=False)
-        database_data = self.orm_manager.join_select(Cnc, Machine, _on={"Cnc.cncid": "Machine.cncid"}, _db_only=True, use_join=False)
+        local_data = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _queue_only=True, _use_join=False)
+        database_data = self.orm_manager.join_select(Cnc, Machine, _on={"Cnc.cncid": "Machine.cncid"}, _db_only=True, _use_join=False)
         self.assertEqual(local_data.items[0]["Machine"]["cncid"], local_data.items[0]["Cnc"]["cncid"])
         self.assertEqual(database_data.items[0]["Cnc"]["cncid"], database_data.items[0]["Machine"]["cncid"])
         self.assertIn("machineid", local_data.items[0]["Machine"])
@@ -1031,9 +1031,9 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Comment - OperationDelegation
         #
         local_data = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"},
-                                                  _queue_only=True, use_join=False)
+                                                  _queue_only=True, _use_join=False)
         database_data = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"},
-                                                     _db_only=True, use_join=False)
+                                                     _db_only=True, _use_join=False)
         self.assertNotEqual(local_data.items[0]["Comment"]["commentid"], database_data.items[0]["Comment"]["commentid"])
         self.assertEqual(local_data.items[0]["Comment"]["commentid"], local_data.items[0]["OperationDelegation"]["commentid"])
         self.assertEqual(database_data.items[0]["Comment"]["commentid"], database_data.items[0]["OperationDelegation"]["commentid"])
@@ -1135,7 +1135,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         со связанными моделями. """
         self.set_data_into_database()
         self.set_data_into_queue()
-        join_select_result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, use_join=False)
+        join_select_result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _use_join=False)
         self.assertFalse(join_select_result.has_changes())
         self.orm_manager.set_item(_model=Cnc, name="name_n", _update=True, cncid=1)
         self.assertTrue(join_select_result.has_changes())
@@ -1779,7 +1779,7 @@ class TestSortJoinResultMixin(unittest.TestCase, SetUp):
         self.set_data_into_queue()
 
     def test_sort_by_primary_key(self):
-        query = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _db_only=True, use_join=True)
+        query = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _db_only=True, _use_join=True)
         query.order_by(Machine, by_primary_key=True)
         query.order_by(Machine, by_primary_key=True, decr=False)
         self.assertEqual([i["Machine"]["machineid"] for i in query], [1, 2, 3, 4])
