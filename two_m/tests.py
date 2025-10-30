@@ -808,6 +808,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Провокационный момент:
         # Ставим в столбец отношения внешнего ключа значение, чьего PK не существует
         # тогда будет взята связка из базы данных! с прежним pk-fk
+        result.order_by(by_primary_key=True, decr=False, model=Machine)
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
         self.assertEqual(4, result.__len__())
         self.assertEqual(result.items[0]["Cnc"]["cncid"], 1, result.items[0]["Machine"]["cncid"])
@@ -849,7 +850,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Machine - Cnc
         result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"},
                                               _use_join=True)
-        result.order_by(Machine, by_column_name="machinename", decr=False)
+        result.order_by(by_primary_key=True, model=Machine)
         self.assertEqual("Newcnc", result.items[0]["Cnc"]["name"])
         self.assertEqual(1, result.items[0]["Cnc"]["cncid"])
         self.assertEqual("Tesm", result.items[0]["Machine"]["machinename"])
@@ -981,7 +982,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Найдутся ли записи с pk равными значениям, которые мы добавили
         # Machine - Cnc
         result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _use_join=False)
-        result.order_by(Machine, by_primary_key=True, decr=True)
+        result.order_by(Machine, by_primary_key=True, decr=False)
         self.assertEqual("Newcnc", result.items[0]["Cnc"]["name"])
         self.assertEqual("Tesm", result.items[0]["Machine"]["machinename"])
         self.assertEqual("Ram", result.items[1]["Cnc"]["name"])
@@ -1099,8 +1100,14 @@ class TestToolHelper(unittest.TestCase, SetUp):
 
     def test_join_select_triple_models__join_select_option(self):
         """ Тестировать запрос с join select, в котором участвуют 3 таблицы """
-        # todo
-        ...
+        # Добавить в базу и кеш данные
+        self.set_data_into_database()
+        self.set_data_into_queue()
+        # Возвращает ли метод экземпляр класса JoinSelectResult?
+        self.assertIsInstance(self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid",
+
+                                                                              }, _use_join=False),
+                              JoinSelectResult)
 
     @drop_cache
     @db_reinit
@@ -1336,14 +1343,18 @@ class TestSliceMixin(unittest.TestCase, SetUp):
         self.set_data_into_database()
         self.set_data_into_queue()
         result_obj = self.orm_manager.get_items(_model=Machine)
-        result_obj[:1]
-        # todo
+        primary_keys = [n.get_primary_key_and_value(only_value=True) for n in result_obj]  # Начальная последовательность
+        self.assertEqual(6, len(result_obj))  # На текущий момент должно быть 6
+        result_obj[1:1]
+        self.assertIn(len(result_obj), [1, 2])  # От 1 до 2 результатов, - 1 из очереди локальных элементов и 1 из базы
+
+
 
 
 class LetterSort(unittest.TestCase):
     def test_init(self):
         LetterSortSingleNodes(Machine, "machinename", ServiceOrmContainer())
-        LetterSortNodesChain(Cnc, "name", [ServiceOrmContainer()])
+        LetterSortNodesChain(Cnc, "name", (ServiceOrmContainer(),))
         with self.assertRaises((TypeError, ValueError,)):
             LetterSortSingleNodes()
             LetterSortSingleNodes("field_n")
