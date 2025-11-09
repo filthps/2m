@@ -577,9 +577,11 @@ class QueueNodeSearchTool(LinkedList):
         node_index = self._support_negative_index(node_index)  # O(1)
         try:
             hash_val = self.__node_index_hash_map[node_index]
-            return self.__items_hash_map[hash_val]
+            node = self.__items_hash_map[hash_val]
         except KeyError:
             raise IndexError
+        else:
+            return node
 
     def __setitem__(self, key, value):  # O(n)
         new_node = self.LinkedListItem(**value)  # O(1)
@@ -613,6 +615,7 @@ class QueueNodeSearchTool(LinkedList):
             prev_node.next = None
             self._tail = prev_node
             node.prev = None
+            self.__reset_mappings_and_indexes()
             return
         next_node = node.next
         prev_node = node.prev()
@@ -703,13 +706,14 @@ class Queue(LinkedList):
             for inner in items:
                 self.enqueue(**inner)
 
-    def enqueue(self, **attrs):  # O(n * log(n))
+    def enqueue(self, _remove_fk=True, **attrs):  # O(n * log(n))
         """ Установка ноды в конец очереди с хитрой логикой проверки на совпадение. """
         exists_item, new_item = self._replication(**attrs)  # O(1)
         self._remove_from_queue(exists_item) if exists_item is not None else None
-        self._remove_other_node_with_current_foreign_key_value(new_item)  # O(n * log(n))
+        if _remove_fk:
+            self._remove_other_node_with_current_foreign_key_value(new_item)  # O(n * log(n))
         self._check_primary_key_unique(new_item)  # O(n)
-        self._check_unique_values(new_item)  # O(k)
+        self._check_unique_values(new_item, check_fk_values=_remove_fk)  # O(k)
         self.append(**new_item.get_attributes())  # O(1)
 
     def dequeue(self) -> Optional[QueueItem]:
@@ -727,8 +731,7 @@ class Queue(LinkedList):
             return left_node
 
     def get_related_nodes(self, main_node: QueueItem, other_container=None) -> "Queue":
-        """ Получить все связанные (внешним ключом) с передаваемой нодой ноды.
-        O(i) * O(1) + O(n) = O(n)"""
+        """ Получить все связанные (внешним ключом) с передаваемой нодой ноды. """
         root = self
         if other_container is not None:
             if type(other_container) is not self.__class__:
@@ -854,6 +857,11 @@ class Queue(LinkedList):
                 output.append(**right_node.get_attributes())
         return output
 
+    def __eq__(self, other):
+        if type(other) is not type(self):
+            return False
+        return [node.get_primary_key_and_value() for node in self] == [node.get_primary_key_and_value() for node in other]
+
     def _replication(self, **new_node_complete_data: dict) -> tuple[Optional[QueueItem], QueueItem]:  # O(l * k) + O(n) + O(1) = O(n)
         """
         Создавать ноды для добавления можно только здесь! Логика для постаовки в очередь здесь.
@@ -905,9 +913,10 @@ class Queue(LinkedList):
             raise TypeError
         del self[left_node.index]
 
-    def _check_unique_values(self, node):
+    def _check_unique_values(self, node, check_fk_values=True):
         """
         Валидация на предмет нарушения уникальности в полях разных нод
+        :param check_fk_values: Столбцы отношений тоже являются unique constraint, но не всегда требудется учитывать их
         :param node: Инициализированная для добавления нода
         :return: None
         """
@@ -915,6 +924,7 @@ class Queue(LinkedList):
             raise TypeError
         if not self:
             return
+        foreign_key_columns = ModelTools.get_foreign_key_columns(node.model)
         unique_fields = ModelTools.get_unique_columns(node.model, node.value)
         for unique_field in unique_fields:
             if unique_field not in node.value:
@@ -924,6 +934,9 @@ class Queue(LinkedList):
                 if n.model.__name__ == node.model.__name__:
                     if unique_field in n.value:
                         if n.value[unique_field] == value:
+                            if not check_fk_values:
+                                if unique_field in foreign_key_columns:
+                                    continue
                             raise NodeColumnValueError
 
     def _check_primary_key_unique(self, node):
@@ -970,9 +983,11 @@ class ServiceOrmItem(QueueItem, AbsNode):
 
     @property
     def retries(self):
+        """ Функционал не предназначенный для данного типа нод """
         return None
 
     def make_query(self):
+        """ Функционал не предназначенный для данного типа нод """
         pass
 
     def __hash__(self):
@@ -982,10 +997,10 @@ class ServiceOrmItem(QueueItem, AbsNode):
         str_ = "".join(map(lambda x: str(x), itertools.chain(*value.items())))
         return int.from_bytes(hashlib.md5(str_.encode("utf-8")).digest(), "big")
 
-    def __eq__(self, other: "QueueItem"):
+    def __eq__(self, other: "ServiceOrmItem"):
         if type(other) is not type(self):
             return False
-        return str(self.__hash__()) == str(hash(other))
+        return str(self.hash_by_pk) == str(other.hash_by_pk)
 
     @staticmethod
     def _is_valid_dml_type(*a, **k):
@@ -1037,9 +1052,7 @@ class ServiceOrmContainer(Queue):
     def __eq__(self, other):
         if not isinstance(other, self.__class__):
             return False
-        if not len(self) == len(other):
-            return False
-        return str(hash(self)) == str(hash(other))
+        return str(self.hash_by_pk) == str(other.hash_by_pk)
 
     def __hash__(self):
         return sum(map(hash, self))
@@ -3213,101 +3226,118 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
         return False
 
     def _merge(self) -> tuple[ResultORMCollection]:
-        def get_main_nodes(node_groups: list[ServiceOrmContainer]) -> Iterator[tuple]:
+        def get_main_nodes(node_groups):
             """ Получить все ноды, чьи столбцы внешних ключей не ссылаются на другие ноды.
              1) Если нода в принципе не имеет столбцов foreign key, то будем считать ноду подходящей
              2) Если ни одно из значений foreign key столбцов не являются primary key соседних нод (в данной связке),
              то будем считать ноду подходящей.
              """
-            exists_items = set()
-            for node_group in node_groups:
-                has_value = False
+            def recursive_search_main_node(node_group: "ServiceOrmContainer", current_node: "ServiceOrmItem" = None):
+                if current_node is None:
+                    current_node = node_group.head
+                if current_node is None:
+                    return
+                foreign_keys = ModelTools.get_foreign_key_columns(current_node.model)
+                if not foreign_keys:
+                    return current_node
                 for node in node_group:
-                    fk_columns = ModelTools.get_foreign_key_columns(node.model)
-                    if not fk_columns:
-                        yield str(node.hash_by_pk), node_group
-                        exists_items.add(str(node.hash_by_pk))
+                    if current_node == node:
                         continue
-                    for foreign_key_column_name in fk_columns:
-                        for other_node in node_group:
-                            if str(other_node.hash_by_pk) in exists_items:
-                                continue
-                            if str(node.hash_by_pk) == str(other_node.hash_by_pk):
-                                continue
-                            if foreign_key_column_name not in node.value:
-                                continue
-                            if other_node.get_primary_key_and_value(only_value=True) == node.value[foreign_key_column_name]:
-                                other_node_fk_columns = ModelTools.get_foreign_key_columns(other_node.model)
-                                if not other_node_fk_columns:
-                                    yield str(other_node.hash_by_pk), node_group
-                                    exists_items.add(str(other_node.hash_by_pk))
-                                    has_value = True
-                                    break
-                                if all(map(lambda column: other_node.value.get(column, None) is None, other_node_fk_columns)):
-                                    yield str(other_node.hash_by_pk), node_group
-                                    exists_items.add(str(other_node.hash_by_pk))
-                                    has_value = True
-                                    break
-                        if has_value:
-                            break
-                    if has_value:
-                        break
+                    for foreign_key in foreign_keys:
+                        current_node_fk_value = current_node.value.get(foreign_key, None)
+                        if current_node_fk_value is None:
+                            continue
+                        if node.get_primary_key_and_value(only_value=True) == current_node_fk_value:
+                            return recursive_search_main_node(node_group, current_node=node)
+                return current_node
+            for node_items in node_groups:
+                main_node = recursive_search_main_node(node_items)
+                yield main_node, node_items
 
-        def filter_relationship(database_data, local_data):
-            """ Обновить взаимосвязь нод, если в локальной очереди внешние ключи были переопределены. """
+        def filter_relationship(db, local):
+            """ Изменяет переданные списки """
+            # Собрать все ноды из локальных элементов, принадлежащие к интересующим нас таблицам,
+            # значения внешних ключей которых - null,
+            # обойти все ноды из базы данных, если ноды совпадут по первичному ключу и значению,
+            # то удаляем такую ноду из тех данных, что пришли из БД.
             null_foreign_key_nodes = self.__get_nodes_from_local_with_null_fk()
-            for i, db_nodes_group in enumerate(database_data):
+            for i, db_nodes_group in enumerate(db):
+                _, db_nodes_group = db_nodes_group
                 for node_with_null_fk in null_foreign_key_nodes:
                     if node_with_null_fk in db_nodes_group:
                         del db_nodes_group[node_with_null_fk.model.__name__]
                         if len(db_nodes_group) == 1:
-                            del database_data[i]
-            undefined_foreign_key_nodes = tuple(self.__get_local_nodes_without_foreign_key_nodes())
-            for index, local_nodes_group in enumerate(local_data):
-                for left_node, group in undefined_foreign_key_nodes:
-                    if left_node.get_primary_key_and_value(as_tuple=True) not in \
-                            map(lambda n: n.get_primary_key_and_value(as_tuple=True), local_nodes_group):
+                            del db[i]
+
+            # Если один и тот же столбец внешнего ключа, той же таблицы, есть у элемента из базы данных
+            # и у ноды из локальной очереди, то ноду, которая пришла из базы данных удаляем,
+            # считая наши изменения в локальных элементах приоритетными.
+            for index, db_main_node_and_data in enumerate(db):
+                db_main_node, db_group = db_main_node_and_data
+                for local_main_node, local_group in local:
+                    if not db_main_node == local_main_node:
                         continue
-                    if len(group) > 1:
-                        local_nodes_group += group
-                        continue
-                    del local_nodes_group[left_node]
-                    if len(local_nodes_group) == 1:
-                        del local_data[index]
-                        break
+                    for db_node in db_group.mutable_iterator:
+                        if db_node == db_main_node:
+                            continue
+                        for local_node in local_group:
+                            if local_node == local_main_node:
+                                continue
+                            if not db_node == local_node:
+                                continue
+                            foreign_keys = ModelTools.get_foreign_key_columns(db_node.model)
+                            for foreign_key in foreign_keys:
+                                fk_value_from_db_node = db_node.value.get(foreign_key, None)
+                                fk_value_from_local_node = local_node.value.get(foreign_key, None)
+                                if fk_value_from_db_node is not None and fk_value_from_local_node is not None:
+                                    if not fk_value_from_db_node == fk_value_from_local_node:
+                                        db_group.remove(db_node.model, *db_node.get_primary_key_and_value(as_tuple=True))
+                if len(db_group) == 1:
+                    del db[index]
 
         def merge(db_items, local_items_):
-            """
-            :param db_items: Коллекция из базы данных
-            :param local_items_:Коллекция из локальных элементов очереди на коммит в базу
-            """
-            local_data = dict(local_items_)
-            for main_node_hash, group in db_items:
-                local_items_group = local_data.get(main_node_hash, None)
+            local_data = dict(map(lambda x: (str(x[0].hash_by_pk), x[1],), local_items_))
+            for main_node, db_group in db_items:
+                db_main_node_primary_key_hash = str(main_node.hash_by_pk)
+                local_items_group = local_data.get(db_main_node_primary_key_hash, None)
                 if local_items_group:
-                    yield group + local_items_group
-                    del local_data[main_node_hash]
+                    yield db_group + local_items_group
+                    del local_data[db_main_node_primary_key_hash]
                 else:
-                    yield group
+                    yield db_group
             for val in local_data.values():
                 yield val
 
         def update_node_data(merged_data):
-            """ Пройтись по всем нодам в результатах, обновить значения нод """
-            all_nodes = self.__get_all_local_nodes()
-            for group_nodes in merged_data:
-                for node in all_nodes:
-                    if node in group_nodes:
-                        group_nodes.enqueue(**node.get_attributes())
-                yield group_nodes
+            """ Пройтись по всем нодам в результатах, обновить уже 'синтезированного' результата,
+             реплицировав его нодами из локальных элементов.
+             Но перед этим из локальных нод удаляются все значения внешних ключей. """
+            def get_local_nodes_with_removed_fk(local_items):
+                u = ServiceOrmContainer()
+                for node in local_items:
+                    foreign_keys = ModelTools.get_foreign_key_columns(node.model)
+                    node_value = {column: value for column, value in node.value.items() if column not in foreign_keys}
+                    u.append(_model=node.model, _update=True, **node_value)
+                return u
+
+            all_local_nodes_without_fk = get_local_nodes_with_removed_fk(self.__get_all_local_nodes())
+            for nodes_group in merged_data:
+                for node in nodes_group:
+                    cleaned_node = all_local_nodes_without_fk.get_node(node.model, **node.get_primary_key_and_value())
+                    if cleaned_node:
+                        nodes_group.enqueue(_remove_fk=False, **cleaned_node.get_attributes())
+                yield nodes_group
+
         local_items = list(self.get_local_nodes())
         all_nodes_from_database = list(self.get_nodes_from_database())
         if not local_items:
             return tuple(ResultORMCollection(item) for item in all_nodes_from_database)
         if not all_nodes_from_database:
             return tuple(ResultORMCollection(item) for item in local_items)
-        filter_relationship(all_nodes_from_database, local_items)
-        merged_data = merge(get_main_nodes(all_nodes_from_database), get_main_nodes(local_items))
+        db_items_with_main_nodes = list(get_main_nodes(all_nodes_from_database))
+        local_items_with_main_nodes = list(get_main_nodes(local_items))
+        filter_relationship(db_items_with_main_nodes, local_items_with_main_nodes)
+        merged_data = merge(db_items_with_main_nodes, local_items_with_main_nodes)
         result_data = update_node_data(merged_data)
         return self._create_output(result_data)
 
