@@ -132,6 +132,10 @@ class LinkedList:
     def tail(self):
         return self._tail
 
+    @property
+    def mutable_iterator(self):
+        return self.__gen(self._head, edit_mode=True)
+
     def append(self, *args, node_item=None, **kwargs):
         """
         Добавить ноду в нонец
@@ -246,7 +250,7 @@ class LinkedList:
         return current_item
 
     def __iter__(self):
-        return self.__gen(self._head)
+        return self.__gen(self._head, edit_mode=False)
 
     def __repr__(self):
         return f"{self.__class__}({tuple(self)})"
@@ -391,8 +395,11 @@ class LinkedList:
             node = node.next
 
     @staticmethod
-    def __gen(start_item: Optional[LinkedListItem] = None) -> Iterator:
-        current_item = start_item
+    def __gen(start_item: Optional[LinkedListItem] = None, edit_mode=False) -> Iterator:
+        """ :arg edit_mode: если в процессе обхода итератора есть потребность изменения связанного списка
+        (добавление нового элемента),
+        то данный режим следует включить """
+        current_item = copy.deepcopy(start_item) if edit_mode else start_item
         while current_item is not None:
             yield current_item
             current_item = current_item.next
