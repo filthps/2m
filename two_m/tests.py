@@ -808,33 +808,35 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Провокационный момент:
         # Ставим в столбец отношения внешнего ключа значение, чьего PK не существует
         # тогда будет взята связка из базы данных! с прежним pk-fk
-        result.order_by(by_primary_key=True, decr=False, model=Machine)
+        result.order_by(by_primary_key=True, model=Machine)
+        self.assertFalse(any(filter(lambda x: not len(x) == 2, result)))
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
+        self.assertFalse(any(filter(lambda x: not len(x) == 2, result)))
         self.assertEqual(4, result.__len__())
         self.assertEqual(result.items[0]["Cnc"]["cncid"], 1, result.items[0]["Machine"]["cncid"])
-        self.assertEqual(result.items[0]["Cnc"]["name"], "NC210")  # Из базы
-        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")  # Тоже из базы
-        self.orm_manager.set_item(Machine, machinename="Heller", cncid=2, _update=True)  # найдётся по столбцу machinename, потому что (unique constraint)
+        self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Tesm")
+        self.orm_manager.set_item(_model=Machine, machineid=1, cncid=2, _update=True)  # найдётся по столбцу machinename, потому что (unique constraint)
+        self.assertFalse(any(filter(lambda x: not len(x) == 2, result)))
         # Изначально было 2 связки, но так как 1 разрушили, то осталась всего одна
         self.assertEqual(3, result.__len__())
-        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Tesm")
         self.assertEqual(result.items[0]["Cnc"]["name"], "Ram")
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)
-        self.assertEqual(1, result.__len__())
-        self.orm_manager.set_item(Machine, cncid=2, machineid=2, _update=True)  # Восстановили связь, теперь снова 2 связки в результатах
-        self.assertEqual(2, len(result))
-        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
+        self.assertEqual(4, result.__len__())
+        self.orm_manager.set_item(Machine, cncid=2, machineid=2, _update=True)
+        self.assertEqual(4, len(result))
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Tesm")
         self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)  # Ничего не должно измениться
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=1, _update=True)  # Ничего не должно измениться
-        self.assertEqual(2, len(result))
-        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")
+        self.assertEqual(4, len(result))
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Tesm")
         self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
-        # Нарушить связь PK - FK
+        # Нарушить связь PK - FK, но в бд по-прежнему cncid=1 - machineid=1, поэтому появится в результатах
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
-        self.assertEqual(result.items[0]["Machine"]["machinename"], "Heller")  # Теперь убедимся, что видим результат из базы данных,
-        # потому как cncid == 9 не существует ни в результатах из базы, ни в локальных результатах
-        self.assertEqual(result.items[0]["Cnc"]["name"], "NC210")
+        self.assertEqual(result.items[0]["Machine"]["machinename"], "Tesm")
+        self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
 
     @drop_cache
     @db_reinit
@@ -891,6 +893,8 @@ class TestToolHelper(unittest.TestCase, SetUp):
                                                   _queue_only=True, _use_join=True)
         database_data = self.orm_manager.join_select(Cnc, Machine, _on={"Cnc.cncid": "Machine.cncid"},
                                                      _db_only=True, _use_join=True)
+        local_data.order_by(by_primary_key=True, model=Machine)
+        database_data.order_by(by_primary_key=True, model=Machine)
         self.assertEqual(local_data.items[0]["Machine"]["cncid"], local_data.items[0]["Cnc"]["cncid"])
         self.assertEqual(database_data.items[0]["Cnc"]["cncid"], database_data.items[0]["Machine"]["cncid"])
         self.assertIn("machineid", local_data.items[0]["Machine"])
@@ -994,7 +998,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         #
         result = self.orm_manager.join_select(Numeration, OperationDelegation,
                                               _on={"Numeration.numerationid": "OperationDelegation.numerationid"}, _use_join=False)
-        result.order_by(Numeration, by_primary_key=True, decr=True)
+        result.order_by(Numeration, by_primary_key=True, decr=False)
         self.assertEqual("Нумерация кадров", result.items[1]["OperationDelegation"]["operationdescription"])
         self.assertEqual("Нумерация. Добавил сразу в БД", result.items[0]["OperationDelegation"]["operationdescription"])
         self.assertEqual("Нумерация кадров", result.items[1]["OperationDelegation"]["operationdescription"])
@@ -1020,6 +1024,8 @@ class TestToolHelper(unittest.TestCase, SetUp):
         #
         local_data = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _queue_only=True, _use_join=False)
         database_data = self.orm_manager.join_select(Cnc, Machine, _on={"Cnc.cncid": "Machine.cncid"}, _db_only=True, _use_join=False)
+        local_data.order_by(by_primary_key=True, model=Machine)
+        database_data.order_by(by_primary_key=True, model=Machine)
         self.assertEqual(local_data.items[0]["Machine"]["cncid"], local_data.items[0]["Cnc"]["cncid"])
         self.assertEqual(database_data.items[0]["Cnc"]["cncid"], database_data.items[0]["Machine"]["cncid"])
         self.assertIn("machineid", local_data.items[0]["Machine"])
@@ -1143,6 +1149,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.set_data_into_database()
         self.set_data_into_queue()
         join_select_result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _use_join=False)
+        join_select_result.order_by(Cnc, by_primary_key=True)
         self.assertFalse(join_select_result.has_changes())
         self.orm_manager.set_item(_model=Cnc, name="name_n", _update=True, cncid=1)
         self.assertTrue(join_select_result.has_changes())
@@ -1303,6 +1310,7 @@ class TestResultPointer(unittest.TestCase, SetUp):
         self.set_data_into_database()
         self.set_data_into_queue()
         result = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"})
+        result.order_by(Cnc, by_primary_key=True)
         result.pointer = ["Результат в списке 1", "Результат в списке 2", "Результат в списке 3", "Результат в списке 4"]
         #
         # Тест wrap_items
@@ -1343,10 +1351,12 @@ class TestSliceMixin(unittest.TestCase, SetUp):
         self.set_data_into_database()
         self.set_data_into_queue()
         result_obj = self.orm_manager.get_items(_model=Machine)
-        primary_keys = [n.get_primary_key_and_value(only_value=True) for n in result_obj]  # Начальная последовательность
-        self.assertEqual(6, len(result_obj))  # На текущий момент должно быть 6
-        result_obj[1:1]
-        self.assertIn(len(result_obj), [1, 2])  # От 1 до 2 результатов, - 1 из очереди локальных элементов и 1 из базы
+        result_obj.order_by(by_primary_key=True)
+        result_obj[1:2]  # return None - OK
+        result_obj.RESIDUAL_ITEM = "none"
+        self.assertEqual(0, result_obj.__len__())
+        result_obj.RESIDUAL_ITEM = "db"
+        self.assertEqual(1, len(result_obj))
 
 
 
