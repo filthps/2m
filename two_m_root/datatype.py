@@ -62,7 +62,7 @@ class LinkedListItem(AbstractNode):
 
     @property
     def prev(self):
-        return self.__prev
+        return self.__prev() if self.__prev is not None else None
 
     @property
     def index(self):
@@ -183,18 +183,13 @@ class LinkedList:
             raise TypeError
         if not self:
             return
-        if self._head.index == self._tail.index:
-            self._head = self._tail = new_node
-            return
-        next_node = old_node.next
-        previous_node = old_node.prev
-        if old_node.index == self._tail.index:
-            self._tail = new_node
-        if old_node.index == 0:
-            self._head = new_node
-        previous_node.next = new_node
-        next_node.prev = new_node
-        return new_node
+        target = self.__forward_move(old_node.index)
+        prev_node = target.prev
+        next_node = target.next
+        if prev_node is not None:
+            prev_node.next = new_node
+        if next_node is not None:
+            next_node.prev = new_node
 
     def __getitem__(self, index):
         if type(index) is slice:
