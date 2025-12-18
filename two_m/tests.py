@@ -152,15 +152,15 @@ class TestLinkedList(unittest.TestCase):
     def test_getitem_slice(self):
         linked_list = LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3},
                                   {"node3_val": 4}, {"node4_val": 5}])
-        self.assertEqual(len(linked_list[:-2]), LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3}, {"node3_val": 4}]).__len__())
-        self.assertEqual(linked_list[:-2], LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3}, {"node3_val": 4}]))
-        self.assertEqual(linked_list[:-2], LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3}, {"node3_val": 4}]))
+        self.assertEqual(linked_list[:-2], LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3}]))
+        self.assertEqual(linked_list[:-2], LinkedList([{"node_val": 1}, {"nod2_val": 2}, {"node3_val": 3}]))
         self.assertEqual(linked_list[:2], linked_list[:-3])
         self.assertEqual(linked_list[:3], linked_list[:-2])
         self.assertEqual(linked_list[:1], linked_list[:1])
         self.assertEqual(linked_list[:-2], linked_list[:-2])
         self.assertEqual(linked_list[1:3], linked_list[1:-2])
         self.assertEqual(linked_list[:], linked_list)
+        self.assertEqual(2, len(linked_list[0:2]))
         linked_list[0:float("inf")]
         with self.assertRaises(IndexError):
             linked_list[5:5]
@@ -563,7 +563,6 @@ class TestToolItemQueue(unittest.TestCase):
         self.assertEqual("Test", first_node["machinename"])
         self.assertEqual(last_node["cncid"], 2)
         self.assertEqual(3, queue[2]["machineid"])
-
 
 class TestResultORMCollection(unittest.TestCase):
     def setUp(self) -> None:
@@ -1114,6 +1113,7 @@ class TestToolHelper(unittest.TestCase, SetUp):
 
                                                                               }, _use_join=False),
                               JoinSelectResult)
+        #  todo
 
     @drop_cache
     @db_reinit
@@ -1347,18 +1347,53 @@ class TestSliceMixin(unittest.TestCase, SetUp):
 
     @drop_cache
     @db_reinit
-    def test_slice(self):
+    def test_slice_invalid_range(self):
+        result_obj = self.orm_manager.get_items(_model=Machine)
+        self.assertRaises(ValueError, lambda: result_obj[0:0])
+        self.assertRaises(ValueError, lambda: result_obj[1:0])
+        self.assertRaises(TypeError, lambda: result_obj[float("inf"):])
+        self.assertRaises(ValueError, lambda: result_obj[5:0])
+        self.assertRaises(ValueError, lambda: result_obj[5:1])
+        self.assertRaises(TypeError, lambda: result_obj[float("inf"):])
+
+
+    @drop_cache
+    @db_reinit
+    def test_slice_items_length(self):
         self.set_data_into_database()
         self.set_data_into_queue()
         result_obj = self.orm_manager.get_items(_model=Machine)
+        length_total = len(result_obj)
         result_obj.order_by(by_primary_key=True)
-        result_obj[1:2]  # return None - OK
+        slice_result = result_obj[1:2]
+        self.assertIsNone(slice_result)  # return None - OK
         result_obj.RESIDUAL_ITEM = "none"
         self.assertEqual(0, result_obj.__len__())
         result_obj.RESIDUAL_ITEM = "db"
         self.assertEqual(1, len(result_obj))
+        result_obj.RESIDUAL_ITEM = "local"
+        self.assertEqual(1, len(result_obj))
+        result_obj[:]
+        self.assertEqual(length_total, result_obj.__len__())
+        result_obj[:4]
+        self.assertEqual(3, len(result_obj))
+        result_obj[1:1]
+        self.assertEqual(0, len(result_obj))
+        result_obj[2:2]
+        self.assertEqual(0, len(result_obj))
+        result_obj[6:6]
+        self.assertEqual(0, len(result_obj))
 
-
+    @drop_cache
+    @db_reinit
+    def test_slice_items_with_order(self):
+        self.set_data_into_database()
+        self.set_data_into_queue()
+        result_obj = self.orm_manager.get_items(_model=Machine)
+        result_obj.order_by(by_primary_key=True, decr=True)
+        self.assertEqual([12, 7, 4, 3, 2, 1], [n.get_primary_key_and_value(only_value=True) for n in result_obj])
+        result_obj[1:5]
+        self.assertEqual([12, 7, 4, 3], [n.get_primary_key_and_value(only_value=True) for n in result_obj])
 
 
 class LetterSort(unittest.TestCase):
