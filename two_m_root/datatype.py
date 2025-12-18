@@ -302,7 +302,7 @@ class LinkedList:
             raise IndexError
         if stop < self._head.index:
             raise IndexError
-        if stop > self._tail.index:
+        if stop > self._tail.index + 1:
             raise IndexError
 
     def _get_slice(self, item: slice) -> "LinkedList":
@@ -311,12 +311,7 @@ class LinkedList:
             return self.__class__()
         left = self._support_negative_index(item.start if item.start is not None else 0)
         right = self._support_negative_index(item.stop if item.stop is not None and not item.stop == float("inf")
-                                             else self._tail.index)
-        if item.stop is not None:
-            if not item.stop == 0:
-                right += 1
-        if item.stop is None:
-            right += 1
+                                             else self._tail.index + 1)
         elem = self.__forward_move(left)
         counter = left
         instance = self.__class__()
