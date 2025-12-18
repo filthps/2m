@@ -1059,7 +1059,7 @@ class ServiceOrmContainer(Queue):
 
 
 class ServiceResultOrmContainer(ServiceOrmContainer):
-    """ Контейнер для хранения выводимых резу """
+    """ Контейнер для хранения выводимых результатов """
     LinkedListItem = ResultORMItem
 
 
@@ -1602,7 +1602,7 @@ class OrderByMixin:
 
     def get_nodes_from_database(self, **kwargs):
         if self._is_sort:
-            kwargs.update(self._create_params_to_load_items())
+            kwargs.update(self._create_params_to_sort_items())
         if hasattr(super(), "get_nodes_from_database"):
             nodes = super().get_nodes_from_database(**kwargs)
             if nodes is not None:  # is None if abstract
@@ -1612,7 +1612,7 @@ class OrderByMixin:
 
     def get_local_nodes(self, **kwargs):
         if self._is_sort:
-            kwargs.update(self._create_params_to_load_items())
+            kwargs.update(self._create_params_to_sort_items())
         if hasattr(super(), "get_local_nodes"):
             nodes = super().get_local_nodes(**kwargs)
             if nodes is not None:  # is None if abstract
@@ -1620,7 +1620,7 @@ class OrderByMixin:
         nodes = self._get_local_nodes(**kwargs)
         return self._sort_items(nodes, **kwargs)
 
-    def _create_params_to_load_items(self) -> dict:
+    def _create_params_to_sort_items(self) -> dict:
         """ Создать параметры, передаваемые в геттер данных, на основе параметров,
         переданных и мемоизированных, со стороны пользователя. """
         output = {"model_in_sort": self._model}
@@ -1713,9 +1713,10 @@ class OrderBySingleResultMixin(OrderByMixin):
                                        decr)
 
     def _sort_items(self, items: ServiceOrmContainer, int_sort: Union[bool, str] = False,
-                   string_sort: Union[bool, str] = False,
-                   by_length=False, by_alphabet=False, by_create_time=False,
-                   reversed_=False, **other_params):
+                    string_sort: Union[bool, str] = False,
+                    by_length=False, by_alphabet=False, by_create_time=False,
+                    reversed_=False, **other_params):
+        self.__is_valid_data(items)
         sorted_nodes = None
         if string_sort:
             sorted_nodes = LetterSortSingleNodes(self._model, string_sort, items, reverse=True if reversed_ else False)
@@ -1729,6 +1730,11 @@ class OrderBySingleResultMixin(OrderByMixin):
         if by_create_time:
             sorted_nodes = ...
         return items
+
+    @staticmethod
+    def __is_valid_data(items):
+        if not isinstance(items, ServiceOrmContainer):
+            raise TypeError
 
 
 class OrderByJoinResultMixin(OrderByMixin, ModelTools):
@@ -1754,11 +1760,11 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
         self._model = model
         super().order_by(by_column_name, by_primary_key, by_create_time, length, alphabet, decr)
 
-    @staticmethod
-    def _sort_items(items: tuple[ServiceOrmContainer], int_sort: Union[bool, str] = False,
+    def _sort_items(self, items: tuple[ServiceOrmContainer], int_sort: Union[bool, str] = False,
                     string_sort: Union[bool, str] = False,
                     by_length=False, by_alphabet=False, by_create_time=False,
                     reversed_=False, model_in_sort=None, **other_params):
+        self.__is_valid_data(item)
         if int_sort:
             return NumberSortNodesChain(model_in_sort, int_sort, items, reverse=reversed_).sort()
         if string_sort:
@@ -1779,6 +1785,14 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
             raise ValueError
         self._model = model
         super()._is_valid_order_by_params(model, by_column_name, by_primary_key, by_create_time, length, alphabet, decr)
+
+    @staticmethod
+    def __is_valid_data(items):
+        if type(items) is not tuple:
+            raise TypeError
+        for nodes_group in items:
+            if not isinstance(nodes_group, ServiceOrmContainer):
+                raise TypeError
 
 
 class SQLAlchemyQueryManager:
@@ -2197,10 +2211,10 @@ class Tool(ModelTools):
                         items_db = items_db.order_by(int_sort or string_sort)
                 if by_create_time:
                     items_db = items_db.order_by("_create_at")
-                    if left_border:
-                        items_db = items_db.offset(left_border)
-                    if right_border and not right_border == float("inf"):
-                        items_db = items_db.limit(right_border)
+                if left_border:
+                    items_db = items_db.offset(left_border)
+                if right_border and not right_border == float("inf"):
+                    items_db = items_db.limit(right_border)
             except OperationalError:
                 print("Ошибка соединения с базой данных! Смотри константу 'DATABASE_PATH' в модуле models.py, "
                       "такая проблема обычно возникает из-за авторизации. Смотри пароль!!!")
@@ -2221,7 +2235,9 @@ class Tool(ModelTools):
                 return ServiceOrmContainer()
             nodes = cls.connection.items.search_nodes(model, **attrs)
             left_border, right_border = SliceResult.change_slice_value_on_items_length(nodes, left_border, right_border)
-            return nodes[left_border:right_border]
+            output = ServiceOrmContainer()
+            [output.append(node_item=n) for n in nodes[left_border:right_border]]
+            return output
         return Result(get_nodes_from_database=select_from_db, get_local_nodes=select_from_cache,
                       only_local=_queue_only, only_database=_db_only, model=model, where=attrs)
 
@@ -2875,15 +2891,19 @@ class SliceResult:
             raise TypeError("Не является итерируемым объектом")
         cls.__is_valid_slice_params(left, right)
         items_length = len(items)
-        return left, right if items_length - 1 <= right else items_length - 1
+        return left, right if items_length > right else items_length
 
     def __getitem__(self, item: slice):
         """ Срез начинается с 1, правая граница не входит, шаг всегда 1 """
         if type(item) is not slice:
             raise TypeError
-        self.__is_valid_slice(item.start - 1, item.stop - 1, item.step)
-        self.__left_border = item.start - 1
-        self.__right_border = item.stop - 1
+        start = item.start if item.start is not None else 1
+        stop = item.stop if item.stop is not None else float("inf")
+        if item.start == 0:
+            raise ValueError("Срез начинается с 1")
+        self.__is_valid_slice(start - 1, stop - 1, item.step)
+        self.__left_border = start - 1
+        self.__right_border = stop - 1
         self._is_slice = True
 
     def _slice_items(self, result_items, left=None, right=None):
@@ -2905,8 +2925,11 @@ class SliceResult:
             return self.__left_border, self.__right_border
         if self.__only_db or self.__only_local:
             return self.__left_border, self.__right_border
+        if not self.__right_border - self.__left_border:
+            return 0, 0
         length = (self.__right_border - self.__left_border) / 2
-        length = math.floor(length) if self.ROUNDING_POLICY == "+" else math.ceil(length)
+        if not length == float("inf"):
+            length = math.floor(length) if self.ROUNDING_POLICY == "+" else math.ceil(length)
         if not length:
             length = 1
         if length == 1:
@@ -2916,6 +2939,8 @@ class SliceResult:
                 return self.__left_border, self.__left_border + 1
             else:
                 return self.__left_border, self.__left_border
+        if length == float("inf"):
+            return self.__left_border, float("inf")
         left, right = None, None
         if current_type == "db":
             left, right = self.__left_border, length
@@ -2957,12 +2982,12 @@ class SliceResult:
 
     @staticmethod
     def __is_valid_result_items(items: Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"]):
-        if not isinstance(items, (ServiceResultOrmContainer, tuple,)):
+        if not isinstance(items, (ResultORMCollection, tuple,)):
             raise TypeError
         if type(items) is tuple:
             if not items:
                 return
-            if type(items[0]) is not ServiceResultOrmContainer:
+            if type(items[0]) is not ResultORMCollection:
                 raise TypeError
 
 
@@ -2974,13 +2999,15 @@ class AbstractResult:
     @abstractmethod
     def get_nodes_from_database(self, *args, **kwargs) -> Union[ServiceOrmContainer, Iterable[ServiceOrmContainer],
                                                                 Iterator[ServiceOrmContainer]]:
-        pass
+        if hasattr(self, "get_nodes_from_database"):
+            return super().get_nodes_from_database(*args, **kwargs)
 
     @abstractmethod
     def get_local_nodes(self, *args, **kwargs) -> Union[ServiceOrmContainer, Iterable[ServiceOrmContainer],
                                                         Iterator[ServiceOrmContainer]]:
         """ Геттер данных из локальной очереди нод. """
-        pass
+        if hasattr(self, "get_local_nodes"):
+            return super().get_local_nodes(*args, **kwargs)
 
     @abstractmethod
     def items(self):
@@ -3150,6 +3177,27 @@ class BaseResult(ABC, SliceResult, ResultCacheTools, AbstractResult):
     def __str__(self):
         return f"{self.__class__.__name__}({self.items})"
 
+    def _sort_items(self, data, **kwargs):
+        """ Окончательная сортировка. После смешивания данных из базы данных и локальных данных """
+        if hasattr(self, "_sort_items"):
+            return super()._sort_items(data, **kwargs)
+        return data
+
+    def _slice_items(self, data, **kwargs):
+        if hasattr(self, "_slice_items"):
+            return super()._slice_items(data, **kwargs)
+        return data
+
+    def _create_params_to_sort_items(self):
+        if hasattr(self, "_create_params_to_sort_items"):
+            return super()._create_params_to_sort_items()
+        return {}
+
+    def _get_slice_index(self, current_type):
+        if hasattr(self, "_get_slice_index"):
+            return super()._get_slice_index(current_type=current_type)
+        return 0, float("inf")
+
     @staticmethod
     def __gen_id(**kwargs):
         """ Сгенерировать id, соответствующий параметрам запроса """
@@ -3169,7 +3217,7 @@ class BaseResult(ABC, SliceResult, ResultCacheTools, AbstractResult):
                 raise TypeError
 
 
-class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
+class Result(BaseResult, OrderBySingleResultMixin, ModelTools):
     """ Экземпляр данного класса возвращается функцией Tool.get_items() """
     TEMP_HASH_PREFIX = "simple_item_hash"
 
@@ -3184,6 +3232,7 @@ class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
         database_items = self.get_nodes_from_database()
         [output.enqueue(**node.get_attributes())
          for collection in (database_items, local_items,) for node in collection]
+        output = self._sort_items(output, **self._create_params_to_sort_items())
         return self._create_output(output)
 
     @staticmethod
@@ -3191,21 +3240,13 @@ class Result(OrderBySingleResultMixin, BaseResult, ModelTools):
         """ Упаковать результат,
         готовый для использования конечным пользователем,
         в специальный защищённый контейнер """
-        output = ServiceOrmContainer()
-        i = iter(data)
-        while True:
-            try:
-                node = next(i)
-            except StopIteration:
-                break
-            output.append(**node.get_attributes())
-        return ResultORMCollection(output)
+        return ResultORMCollection(data)
 
     def __is_valid(self):
         self.is_valid_model_instance(self._model)
 
 
-class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
+class JoinSelectResult(BaseResult, OrderByJoinResultMixin, ModelTools):
     """
     Экземпляр этого класса возвращается функцией Tool.join_select()
     1 экземпляр этого класса 1 результат вызова Tool.join_select()
@@ -3396,24 +3437,8 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ModelTools):
         result_data = merge(all_nodes_from_database, local_items)
         result_data = update_node_data(result_data)
         result_data = fix_local_fk_value(result_data)
-        result_data = self._sort_after_merge(tuple(result_data), **self._create_params_to_load_items())
-        result_data = self._slice_items(result_data)
+        result_data = self._sort_items(tuple(result_data), **self._create_params_to_sort_items())
         return self._create_output(result_data)
-
-    def _sort_after_merge(self, data, **kwargs):
-        """ Окончательная сортировка. После смешивания данных из базы данных и локальных данных """
-        if hasattr(self, "_sort_items"):
-            return self._sort_items(data, **kwargs)
-        return data
-
-    def _slice_after_merge(self, data, **kwargs):
-        if hasattr(self, "_slice_items"):
-            return self._slice_items(data, **kwargs)
-        return data
-
-    def _create_params_to_load_items(self):
-        if hasattr(self, "_create_params_to_load_items"):
-            return super()._create_params_to_load_items()
 
     @staticmethod
     def _create_output(data: Union[Iterable[ServiceOrmContainer], Iterator[ServiceOrmContainer]]) -> tuple[ResultORMCollection]:
