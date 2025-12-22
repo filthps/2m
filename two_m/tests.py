@@ -1375,7 +1375,7 @@ class TestSliceMixin(unittest.TestCase, SetUp):
         self.assertEqual(1, len(result_obj))
         result_obj[:]
         self.assertEqual(length_total, result_obj.__len__())
-        result_obj[:4]
+        result_obj[:4]  # 1, 2, 3
         self.assertEqual(3, len(result_obj))
         result_obj[1:1]
         self.assertEqual(0, len(result_obj))
@@ -1394,6 +1394,8 @@ class TestSliceMixin(unittest.TestCase, SetUp):
         self.assertEqual([12, 7, 4, 3, 2, 1], [n.get_primary_key_and_value(only_value=True) for n in result_obj])
         result_obj[1:5]
         self.assertEqual([12, 7, 4, 3], [n.get_primary_key_and_value(only_value=True) for n in result_obj])
+        result_obj.order_by(by_primary_key=True, decr=False)
+
 
 
 class LetterSort(unittest.TestCase):
@@ -1841,3 +1843,26 @@ class TestSortJoinResultMixin(unittest.TestCase, SetUp):
         self.assertEqual([i["Machine"]["machineid"] for i in query], [1, 2, 3, 4])
         query.order_by(Machine, by_primary_key=True, decr=True)
         self.assertEqual([i["Machine"]["machineid"] for i in query], [4, 3, 2, 1])
+
+    # todo
+
+
+class TestResultPaginator(unittest.TestCase, SetUp):
+    def setUp(self) -> None:
+        drop_db()
+        create_db()
+        init_all_triggers(DATABASE_PATH)
+        Tool.CACHE_LIFETIME_HOURS = 60
+        self.orm_manager = Tool()
+        self.orm_manager.connection.drop_cache()
+        self.set_data_into_database()
+        self.set_data_into_queue()
+
+    def test_single_result_items(self):
+        result_obj = self.orm_manager.get_items(Machine)
+        result_obj.RESIDUAL_ITEM = "db"
+        result_obj.paginate(items_on_page=5)
+        self.assertEqual(result_obj.__len__(), 5)
+
+    def test_join_result_items(self):
+        pass
