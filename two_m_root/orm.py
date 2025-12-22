@@ -1540,7 +1540,39 @@ class TimeSortNodesChain(BaseSortJoinedNodes):
         return list(dict(sorted(nodes_map(), key=operator.itemgetter(0))).values())
 
 
-class OrderByMixin:
+class AbstractResultMixin:
+    def __init__(self, *a, **kw):
+        if not hasattr(self, "_get_local_nodes"):
+            raise AttributeError
+        if not hasattr(self, "_get_nodes_from_database"):
+            raise AttributeError
+        if not callable(self.get_local_nodes):
+            raise TypeError
+        if not callable(self.get_nodes_from_database):
+            raise AttributeError
+        if not isinstance(self, (Result, JoinSelectResult,)):
+            raise TypeError
+        if not issubclass(self.__class__, BaseResult):
+            raise TypeError
+        super().__init__(*a, **kw)
+
+    def get_local_nodes(self, *args, **kwargs) -> Union[tuple[ServiceOrmContainer], ServiceOrmContainer]:
+        """ Перегружаем этот метод в миксине, производя манипуляции с данными или передавая дополнительные аргументы """
+        ...
+
+    def get_nodes_from_database(self, *args, **kwargs) -> Union[tuple[ServiceOrmContainer], ServiceOrmContainer]:
+        """ Перегружаем этот метод в миксине, производя манипуляции с данными или передавая дополнительные аргументы """
+        ...
+
+    @property
+    def items(self):
+        ...
+
+    def __iter__(self):
+        ...
+
+
+class OrderByMixin(AbstractResultMixin):
     """ Реализация функционала для сортировки экземпляров ResultORMCollection в виде примеси для класса Result* """
     BY_PRIMARY_KEY = True  # Дефолтные режимы сортировки
     BY_COLUMN_NAME: Optional[str] = None
@@ -1550,17 +1582,6 @@ class OrderByMixin:
     REVERSED = False
 
     def __init__(self: Union["Result", "JoinSelectResult"], *args, **kwargs):
-        def is_valid():
-            if not hasattr(self, "_get_local_nodes"):
-                raise AttributeError
-            if not hasattr(self, "_get_nodes_from_database"):
-                raise AttributeError
-            if not callable(self.get_local_nodes):
-                raise TypeError
-            if not callable(self.get_nodes_from_database):
-                raise AttributeError
-        if not isinstance(self, (Result, JoinSelectResult)):
-            raise TypeError("Использовать данный класс в наследовании! Как миксин")
         super().__init__(*args, **kwargs)
         self._is_sort = False
         if self.BY_STRING_LENGTH or self.BY_COLUMN_NAME or self.BY_CREATE_TIME:
@@ -1571,7 +1592,6 @@ class OrderByMixin:
         self._by_alphabet = self.BY_ALPHABET
         self._by_string_length = self.BY_STRING_LENGTH
         self._reversed = self.REVERSED
-        is_valid()
 
     @abstractmethod
     def order_by(self, by_column_name, by_primary_key, by_create_time, length, alphabet, decr):
@@ -1696,7 +1716,7 @@ class OrderByMixin:
 
 class OrderBySingleResultMixin(OrderByMixin):
     """ Реализация для 'одиночного результата',- запрос к одной таблице. См Tool.get_items() """
-    def __init__(self: Union["Result", "OrderBySingleResultMixin"], *a, **k):
+    def __init__(self, *a, **k):
         if not isinstance(self, Result):
             raise TypeError
         super().__init__(*a, **k)
@@ -1739,7 +1759,7 @@ class OrderBySingleResultMixin(OrderByMixin):
 
 class OrderByJoinResultMixin(OrderByMixin, ModelTools):
     """ Реализация для запросов с join. См Tool.join_select() """
-    def __init__(self: Union["JoinSelectResult", "OrderByJoinResultMixin"], *a, **k):
+    def __init__(self, *a, **k):
         if not isinstance(self, JoinSelectResult):
             raise TypeError
         self._model = None
@@ -1764,7 +1784,7 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
                     string_sort: Union[bool, str] = False,
                     by_length=False, by_alphabet=False, by_create_time=False,
                     reversed_=False, model_in_sort=None, **other_params):
-        self.__is_valid_data(item)
+        self.__is_valid_data(items)
         if int_sort:
             return NumberSortNodesChain(model_in_sort, int_sort, items, reverse=reversed_).sort()
         if string_sort:
@@ -1793,6 +1813,73 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
         for nodes_group in items:
             if not isinstance(nodes_group, ServiceOrmContainer):
                 raise TypeError
+
+
+class ResultPaginatorMixin(AbstractResultMixin):
+    ITEMS_ON_PAGE = float("inf")  # float("inf") - пагинатор выключен
+
+    def __init__(self, *a, items_on_page=None, current_page=None, **k):
+        super().__init__(*a, **k)
+        self.__page = current_page or 1
+        self.__items_on_page = items_on_page or self.ITEMS_ON_PAGE
+        self.__is_valid(items_on_page=self.__items_on_page, current_page=self.__page)
+        self.page = self.__page
+
+    def paginate(self, items_on_page=None, current_page=1):
+        if items_on_page is None:
+            self.__items_on_page = self.ITEMS_ON_PAGE
+        self.__is_valid(items_on_page=items_on_page, current_page=current_page)
+        self.__page = current_page
+        self.__items_on_page = items_on_page
+        self.page = self.__page
+
+    @property
+    def page(self):
+        return self.__page
+
+    @page.setter
+    def page(self, page_num: int):
+        """ Установить номер текущей страницы """
+        self.__is_valid(current_page=page_num, items_on_page=self.__items_on_page)
+        if self.__items_on_page == float("inf"):
+            left_border = 1
+            right_border = float("inf")
+        else:
+            left_border = page_num * self.__items_on_page if page_num > 1 else 1
+            right_border = left_border + self.__items_on_page
+        self[left_border:right_border]  # use slice mixin
+
+    @property
+    def next_page(self):
+        self.__page += 1
+        self.page = self.__page
+        return self.__page
+
+    @property
+    def prev_page(self):
+        self.__page -= 1
+        if not self.__page:
+            self.__page = 1
+        self.page = self.__page
+        return self.__page
+
+    @property
+    def pages_count(self):
+        return math.floor(self.__len__() / self.__items_on_page)
+
+    @staticmethod
+    def __is_valid(items_on_page=None, current_page=None):
+        if not isinstance(items_on_page, (int, float,)):
+            raise TypeError
+        if type(items_on_page) is float:
+            if not items_on_page == float("inf"):
+                raise ValueError
+        if items_on_page <= 0:
+            raise ValueError
+        if not isinstance(current_page, int):
+            raise TypeError
+        if current_page <= 0:
+            raise ValueError
 
 
 class SQLAlchemyQueryManager:
@@ -2234,7 +2321,7 @@ class Tool(ModelTools):
             if left_border == right_border:
                 return ServiceOrmContainer()
             nodes = cls.connection.items.search_nodes(model, **attrs)
-            left_border, right_border = SliceResult.change_slice_value_on_items_length(nodes, left_border, right_border)
+            left_border, right_border = SliceResultMixin.change_slice_value_on_items_length(nodes, left_border, right_border)
             output = ServiceOrmContainer()
             [output.append(node_item=n) for n in nodes[left_border:right_border]]
             return output
@@ -2448,7 +2535,7 @@ class Tool(ModelTools):
                                                by_length=by_length, by_alphabet=by_alphabet, by_create_time=by_create_time,
                                                reversed_=reversed_, model_in_sort=model_in_sort)
             output = tuple(compare_by_matched_fk())
-            left_border, right_border = SliceResult.change_slice_value_on_items_length(output, left_border, right_border)
+            left_border, right_border = SliceResultMixin.change_slice_value_on_items_length(output, left_border, right_border)
             return output[left_border:right_border]
 
         def get_local_nodes_without_foreign_key_nodes():
@@ -2751,7 +2838,6 @@ class ResultCacheTools(Tool):
     __iter__ = abstractmethod(lambda self: ...)
 
     def __init__(self, id_: int, *args, **kw):
-        super().__init__(id_, *args, **kw)
         if not issubclass(type(self), BaseResult):
             raise TypeError
         if type(id_) is not int:
@@ -2835,7 +2921,7 @@ class ResultCacheTools(Tool):
             raise TypeError
 
 
-class SliceResult:
+class SliceResultMixin(AbstractResultMixin):
     """ Функционал для контроля численности выборки в виде реализации среза. Мемоизация параметров среза."""
     ROUNDING_POLICY: Literal["+", "-"] = ""  # Округление количества элементов в + или в -
     RESIDUAL_ITEM: Literal["db", "local", "none"] = "none"  # Пример: в результате есть 4 элема БД и 3 из локалки,
@@ -2844,24 +2930,12 @@ class SliceResult:
     # или отдавать предпочтение сначала одному из типов до исчерпания, а затем давать из второго типа
     merge = abstractmethod(lambda: ...)  # Слияние данных из базы данных и локальной очереди в 1 общий контейнер
 
-    def __init__(self: Union["SliceResult", "BaseResult"], *a, only_local=False, only_database=False, **kwargs):
-        def is_valid():
-            if not hasattr(self, "_get_local_nodes"):
-                raise AttributeError
-            if not hasattr(self, "_get_nodes_from_database"):
-                raise AttributeError
-            if not callable(self.get_local_nodes):
-                raise TypeError
-            if not callable(self.get_nodes_from_database):
-                raise AttributeError
-        if not issubclass(self.__class__, BaseResult):
-            raise Exception
+    def __init__(self, *a, only_local=False, only_database=False, **kwargs):
         self._is_slice = False
         self.__left_border = 0
         self.__right_border = float("inf")
         self.__only_local = only_local
         self.__only_db = only_database
-        is_valid()
         super().__init__(*a, only_local=only_local, only_database=only_database, **kwargs)
 
     def get_nodes_from_database(self, **kwargs):
@@ -2993,18 +3067,12 @@ class SliceResult:
 
 class AbstractResult:
     @abstractmethod
-    def __init__(self, *args, **kwargs):
-        pass
-
-    @abstractmethod
-    def get_nodes_from_database(self, *args, **kwargs) -> Union[ServiceOrmContainer, Iterable[ServiceOrmContainer],
-                                                                Iterator[ServiceOrmContainer]]:
+    def get_nodes_from_database(self, *args, **kwargs) -> Union[ServiceOrmContainer, tuple[ServiceOrmContainer]]:
         if hasattr(self, "get_nodes_from_database"):
             return super().get_nodes_from_database(*args, **kwargs)
 
     @abstractmethod
-    def get_local_nodes(self, *args, **kwargs) -> Union[ServiceOrmContainer, Iterable[ServiceOrmContainer],
-                                                        Iterator[ServiceOrmContainer]]:
+    def get_local_nodes(self, *args, **kwargs) -> Union[ServiceOrmContainer, tuple[ServiceOrmContainer]]:
         """ Геттер данных из локальной очереди нод. """
         if hasattr(self, "get_local_nodes"):
             return super().get_local_nodes(*args, **kwargs)
@@ -3047,7 +3115,7 @@ class AbstractResult:
         return ...
 
 
-class BaseResult(ABC, SliceResult, ResultCacheTools, AbstractResult):
+class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
     TEMP_HASH_PREFIX: str = ...
 
     def __init__(self, get_nodes_from_database=None, get_local_nodes=None,
@@ -3170,7 +3238,7 @@ class BaseResult(ABC, SliceResult, ResultCacheTools, AbstractResult):
             return True
 
     def __getitem__(self, item: Union[str, int, slice]):
-        if type(item) is slice:
+        if not isinstance(item, int):
             return super().__getitem__(item)
         return self.items[item]
 
@@ -3217,7 +3285,7 @@ class BaseResult(ABC, SliceResult, ResultCacheTools, AbstractResult):
                 raise TypeError
 
 
-class Result(BaseResult, OrderBySingleResultMixin, ModelTools):
+class Result(ResultPaginatorMixin, BaseResult, OrderBySingleResultMixin, ModelTools):
     """ Экземпляр данного класса возвращается функцией Tool.get_items() """
     TEMP_HASH_PREFIX = "simple_item_hash"
 
@@ -3246,7 +3314,7 @@ class Result(BaseResult, OrderBySingleResultMixin, ModelTools):
         self.is_valid_model_instance(self._model)
 
 
-class JoinSelectResult(BaseResult, OrderByJoinResultMixin, ModelTools):
+class JoinSelectResult(ResultPaginatorMixin, BaseResult, OrderByJoinResultMixin, ModelTools):
     """
     Экземпляр этого класса возвращается функцией Tool.join_select()
     1 экземпляр этого класса 1 результат вызова Tool.join_select()
@@ -3273,7 +3341,9 @@ class JoinSelectResult(BaseResult, OrderByJoinResultMixin, ModelTools):
         self.__is_valid()
         super().__init__(*args, models=models, **kwargs)
 
-    def __getitem__(self, item: int) -> ResultORMCollection:
+    def __getitem__(self, item: Union[slice, int]) -> ResultORMCollection:
+        if type(item) is not int:
+            return super().__getitem__(item)
         data = self.items
         if type(item) is not int:
             raise TypeError
