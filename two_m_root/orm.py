@@ -1820,10 +1820,11 @@ class ResultPaginatorMixin(AbstractResultMixin):
 
     def __init__(self, *a, items_on_page=None, current_page=None, **k):
         super().__init__(*a, **k)
-        self.__page = current_page or 1
+        self.__page = 1
         self.__items_on_page = items_on_page or self.ITEMS_ON_PAGE
         self.__is_valid(items_on_page=self.__items_on_page, current_page=self.__page)
-        self.page = self.__page
+        if current_page is not None:
+            self.paginate(current_page=current_page, items_on_page=self.__items_on_page)
 
     def paginate(self, items_on_page=None, current_page=1):
         if items_on_page is None:
@@ -1848,24 +1849,25 @@ class ResultPaginatorMixin(AbstractResultMixin):
             left_border = page_num * self.__items_on_page if page_num > 1 else 1
             right_border = left_border + self.__items_on_page
         self[left_border:right_border]  # use slice mixin
+        self.__page = page_num if self else self.__page
 
     @property
     def next_page(self):
-        self.__page += 1
-        self.page = self.__page
-        return self.__page
+        self.page = self.page + 1
+        return self.page
 
     @property
     def prev_page(self):
-        self.__page -= 1
-        if not self.__page:
+        prev_page = self.page - 1
+        if prev_page <= 1:
+            prev_page = 1
+        self.page = prev_page
+        if not self.page == prev_page:  # Счётчик не изменился, это говорит о том, что элементов нету
             self.__page = 1
-        self.page = self.__page
-        return self.__page
 
     @property
     def pages_count(self):
-        return math.floor(self.__len__() / self.__items_on_page)
+        return math.ceil(self.__len__() / self.__items_on_page)
 
     @staticmethod
     def __is_valid(items_on_page=None, current_page=None):
