@@ -2058,7 +2058,11 @@ class PrimaryKeyFactory(ModelTools):
 
     @classmethod
     def create_primary(cls, model, **data) -> dict:
+        """ Синхронизация данных нод из внешних расположений для одной ноды. """
         cls.is_valid_model_instance(model)
+        if type(data) is not dict:
+            raise TypeError
+        cls.__check_node_data(model, data)
         name = cls.get_primary_key_column_name(model)
         pk = cls._select_primary_key_value_from_node_data(model, data)
         if pk is not None:
@@ -2101,6 +2105,18 @@ class PrimaryKeyFactory(ModelTools):
         raise NodePrimaryKeyError
 
     @classmethod
+    def create_primary_key_many(cls, model, data: list[dict]) -> tuple[dict]:
+        """ Синхронизация данных нод из внешних расположений для одной ноды.
+        Все ноды должны принадлежать одной и той же таблице. """
+        if not cls.is_valid_model_instance(model):
+            raise TypeError
+        if type(data) is not list:
+            raise TypeError
+        [cls.__check_node_data(model, n) for n in data]
+
+
+
+    @classmethod
     def _update_node_data_from_database_by_pk(cls, model, primary_key: dict, data: dict) -> dict:
         cls.is_valid_model_instance(model)
         if type(primary_key) is not dict:
@@ -2110,6 +2126,28 @@ class PrimaryKeyFactory(ModelTools):
         pk = cls._select_primary_key_value_from_node_data(model, data)
         if not pk == primary_key:
             raise NodePrimaryKeyError
+        select_result: dict = cls.connection.database.query(model).filter_by(**primary_key).all()
+        if select_result:
+            select_result = select_result[0].__dict__
+            cls.__remove_local_data_from_database_data(model, primary_key, select_result)
+            select_result.update(primary_key)
+            select_result.update(data)
+            select_result = cls.__replace_insert_dml_on_update(select_result)
+            return cls.__clear_node_data(model, select_result)
+        data = cls.__replace_insert_dml_on_insert(data)
+        return data
+
+    @classmethod
+    def _update_node_data_from_database_by_pk_multiple(cls, model, data: list[dict]) -> list[dict]:
+        cls.is_valid_model_instance(model)
+        [cls.__check_node_data(model, node_data) for node_data in data]
+        pk_data = []
+        for current_data in data:
+            value = cls._select_primary_key_value_from_node_data(model, current_data)
+            if value:
+                pk_data.append(value)
+        # todo ...
+        ...
         select_result: dict = cls.connection.database.query(model).filter_by(**primary_key).all()
         if select_result:
             select_result = select_result[0].__dict__
@@ -2219,6 +2257,15 @@ class PrimaryKeyFactory(ModelTools):
             return node_data
         node_data.update({"_insert": True, "_update": False})
         return node_data
+    
+    @staticmethod
+    def __check_node_data(model: CustomModel, node_data: dict):
+        if type(node_data) is not dict:
+            raise TypeError
+        if not node_data:
+            raise ValueError
+        if frozenset(node_data) - frozenset(model().column_names):
+            raise ValueError(f"В словаре data обнаружены столбцы, которые не относятся к {model.__name__}.")
 
 
 class Tool(ModelTools):
