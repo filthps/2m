@@ -1220,6 +1220,21 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.set_data_into_database()
         self.assertTrue(result.has_new_entries())
 
+    @db_reinit
+    @drop_cache
+    def test_b(self):
+        from sqlalchemy import or_
+        self.set_data_into_database()
+        self.set_data_into_queue()
+
+        def test(model, connection):
+            l = [1, 2, 3]
+            primary_key = ModelTools.get_primary_key_column_name(Machine)
+            pk_data = [getattr(model, primary_key) == value for value in l]
+            q = connection.query(Machine).filter(or_(*pk_data)).all()
+            print([r.__dict__ for r in q])
+        test(Machine, Tool.connection.database)
+
 
 class TestResultPointer(unittest.TestCase, SetUp):
     def setUp(self) -> None:

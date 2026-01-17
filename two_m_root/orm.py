@@ -29,7 +29,7 @@ from weakref import ref
 from typing import Union, Iterator, Iterable, Optional, Literal, Type, Any
 from collections import ChainMap
 from pymemcache.client.base import PooledClient
-from sqlalchemy import create_engine, delete, insert, update, text, CursorResult
+from sqlalchemy import create_engine, delete, insert, update, text, CursorResult, or_, and_
 from sqlalchemy.sql.expression import func, desc, join, select
 from sqlalchemy.sql.dml import Insert, Update, Delete
 from sqlalchemy.orm import Query, sessionmaker as session_factory, scoped_session
@@ -65,13 +65,6 @@ class ModelTools:
             if data["autoincrement"]:
                 return True
         return False
-
-    @classmethod
-    def get_primary_key_python_type(cls, model: Type[CustomModel]) -> Type:
-        cls.is_valid_model_instance(model)
-        for column_name, data in model().column_names.items():
-            if data["primary_key"]:
-                return data["type"]
 
     @classmethod
     def get_unique_columns(cls, model, data: dict) -> Iterator[str]:
@@ -2063,49 +2056,49 @@ class PrimaryKeyFactory(ModelTools):
         if type(data) is not dict:
             raise TypeError
         cls.__check_node_data(model, data)
-        name = cls.get_primary_key_column_name(model)
-        pk = cls._select_primary_key_value_from_node_data(model, data)
-        if pk is not None:
-            if type(pk[name]) is not ModelTools.get_primary_key_python_type(model):
-                raise NodePrimaryKeyError("Первичный ключ должен быть другого типа")
-            pk_from_db = cls._get_highest_autoincrement_pk_from_database(model)
-            if pk_from_db is not None:
-                if pk_from_db >= pk[name]:
-                    data = cls._update_node_data_from_database_by_pk(model, pk, data)
-                    data.update(data)
-            return data
+        primary_key = cls.get_primary_key_column_name(model)
+        pk_from_current_node = cls._select_primary_key_value_from_node_data(model, data)
         data = cls._update_node_data_from_database_by_unique_column(model, data)
-        if name in data:
-            pk = {name: data[name]} if data else None
+        if pk_from_current_node:
             data = cls._update_node_data_from_local_nodes_by_unique_column(model, data)
-            del data[name]
-            data.update(pk)
+        if data["_insert"]:
+            if primary_key in data:
+                return data
+            default_value = cls.get_default_column_value_or_function(model, primary_key)
+            if default_value is not None:
+                data.update({primary_key: default_value.arg(None)})
+                return data
+            if cls.is_autoincrement_primary_key(model):
+                pk_value_db = cls._get_highest_autoincrement_pk_from_database(model) or 0
+                pk_value_local = cls._get_highest_autoincrement_pk_from_local(model) or 0
+                data.update({primary_key: pk_value_local + pk_value_db + 1})
+                return data
+            raise NodePrimaryKeyError
+        if data["_update"]:
+            pass
+        if cls.is_autoincrement_primary_key(model):
+            pk_from_db = cls._get_highest_autoincrement_pk_from_database(model)
+
+            if pk_from_current_node is not None:
+                if pk_from_db is not None:
+                    if pk_from_db >= pk_from_current_node[primary_key]:
+                        cls._update_node_data_from_database_by_pk(model, pk_from_current_node, data)
+            else:
+                data.update({primary_key: pk_from_db + 1})
             return data
-        data = cls._update_node_data_from_local_nodes_by_unique_column(model, data)
-        if name in data:
-            return data
-        default_value = cls.get_default_column_value_or_function(model, name)
+        default_value = cls.get_default_column_value_or_function(model, primary_key)
         if default_value is not None:
-            data.update({name: default_value.arg(None)})
+            data.update({primary_key: default_value.arg(None)})
             return data
         if cls.is_autoincrement_primary_key(model):
-            pk_value_db = cls._get_highest_autoincrement_pk_from_database(model)
-            pk_value_local = cls._get_highest_autoincrement_pk_from_local(model)
-            if pk_value_local and pk_value_db:
-                data.update({name: pk_value_local + pk_value_db + 1})
-                return data
-            if pk_value_db:
-                data.update({name: pk_value_db + 1})
-                return data
-            if pk_value_local:
-                data.update({name: pk_value_local + 1})
-                return data
-            data.update({name: 1})
+            pk_value_db = cls._get_highest_autoincrement_pk_from_database(model) or 0
+            pk_value_local = cls._get_highest_autoincrement_pk_from_local(model) or 0
+            data.update({primary_key: pk_value_local + pk_value_db + 1})
             return data
         raise NodePrimaryKeyError
 
     @classmethod
-    def create_primary_key_many(cls, model, data: list[dict]) -> tuple[dict]:
+    def create_primary_key_many(cls, model, data: list[dict]) -> list[dict]:
         """ Синхронизация данных нод из внешних расположений для одной ноды.
         Все ноды должны принадлежать одной и той же таблице. """
         if not cls.is_valid_model_instance(model):
@@ -2113,7 +2106,23 @@ class PrimaryKeyFactory(ModelTools):
         if type(data) is not list:
             raise TypeError
         [cls.__check_node_data(model, n) for n in data]
-
+        primary_key_column_name = cls.get_primary_key_column_name(model)
+        primary_keys_from_current_local_data = []
+        if cls.is_autoincrement_primary_key(model):
+            autoincrement_value_db = cls._get_highest_autoincrement_pk_from_database(model)
+            autoincrement_value_local = cls._get_highest_autoincrement_pk_from_local(model)
+            current_pk_counter = autoincrement_value_db + autoincrement_value_local + 1
+            for node_data in data:
+                if node_data[primary_key_column_name] in range(current_pk_counter - 1):
+                    cls.__replace_insert_dml_on_update(node_data)
+                else:
+                    node_data[primary_key_column_name] = current_pk_counter
+                    current_pk_counter += 1
+            return data
+        for node_data in data:
+            value = node_data.get(primary_key_column_name, None)
+            if value is None:
+                node_data[primary_key_column_name] = cls.get_default_column_value_or_function(model, primary_key_column_name)
 
 
     @classmethod
@@ -2138,33 +2147,63 @@ class PrimaryKeyFactory(ModelTools):
         return data
 
     @classmethod
-    def _update_node_data_from_database_by_pk_multiple(cls, model, data: list[dict]) -> list[dict]:
+    def _update_node_data_from_database_by_pk_multiple(cls, model, local_data: list[dict]) -> tuple[list[dict], set]:
         cls.is_valid_model_instance(model)
-        [cls.__check_node_data(model, node_data) for node_data in data]
+        [cls.__check_node_data(model, node_data) for node_data in local_data]
         pk_data = []
-        for current_data in data:
+        primary_key = cls.get_primary_key_column_name(model)
+        for current_data in local_data:
             value = cls._select_primary_key_value_from_node_data(model, current_data)
             if value:
-                pk_data.append(value)
-        # todo ...
-        ...
-        select_result: dict = cls.connection.database.query(model).filter_by(**primary_key).all()
-        if select_result:
-            select_result = select_result[0].__dict__
-            cls.__remove_local_data_from_database_data(model, primary_key, select_result)
-            select_result.update(primary_key)
-            select_result.update(data)
-            select_result = cls.__replace_insert_dml_on_update(select_result)
-            return cls.__clear_node_data(model, select_result)
-        data = cls.__replace_insert_dml_on_insert(data)
-        return data
+                pk_data.append(getattr(model, primary_key) == value[primary_key])
+        select_result: dict = cls.connection.database.query(model).filter_by(or_(*pk_data)).all()
+        pk_from_db = set()
+        for value in select_result:
+            db_data = cls.__clear_node_data(model, value.__dict__)
+            for index, current_local_item in enumerate(local_data):
+                val = current_local_item[primary_key]
+                if val == db_data[primary_key]:
+                    cls.__remove_local_data_from_database_data(model, {primary_key: val}, db_data)
+                    db_data.update({primary_key: val})
+                    db_data.update(current_local_item)
+                    db_data = cls.__replace_insert_dml_on_update(db_data)
+                    local_data[index] = db_data
+                    pk_from_db.add(val)
+        return local_data, pk_from_db
+
+    @classmethod
+    def _update_node_data_from_database_by_unique_column_multiple(cls, model, local_data: list[dict]) -> tuple[list[dict], set]:
+        cls.is_valid_model_instance(model)
+        [cls.__check_node_data(model, node_data) for node_data in local_data]
+        pk_data = []
+        for current_data in local_data:
+            unique_data = cls.get_unique_columns(model, current_data)
+            if not unique_data:
+                continue
+            pk_data.append(and_([getattr(model, q) == current_data[q] for q in unique_data]))
+        select_result: dict = cls.connection.database.query(model).filter_by(or_(*pk_data)).all()
+        primary_key = cls.get_primary_key_column_name(model)
+        pk_from_db = set()
+        for value in select_result:
+            db_data = cls.__clear_node_data(model, value.__dict__)
+            for index, current_local_item in enumerate(local_data):
+                val = current_local_item[primary_key]
+                if val == db_data[primary_key]:
+                    cls.__remove_local_data_from_database_data(model, {primary_key: val}, db_data)
+                    db_data.update({primary_key: val})
+                    db_data.update(current_local_item)
+                    db_data = cls.__replace_insert_dml_on_update(db_data)
+                    local_data[index] = db_data
+                    pk_from_db.add(val)
+        return local_data, pk_from_db
 
     @classmethod
     def _update_node_data_from_database_by_unique_column(cls, model, data: dict) -> dict:
         cls.is_valid_model_instance(model)
         if not isinstance(data, dict):
             raise TypeError
-        unique_columns = tuple(cls.get_unique_columns(model, data))
+        unique_columns = list(cls.get_unique_columns(model, data))
+        unique_columns.remove(cls.get_primary_key_column_name(model))                      
         unique_data = {key: data[key] for key in data if key in unique_columns}
         select_result = None
         if unique_data:
@@ -2182,7 +2221,8 @@ class PrimaryKeyFactory(ModelTools):
 
     @classmethod
     def _update_node_data_from_local_nodes_by_unique_column(cls, model, data: dict):
-        unique_columns = tuple(cls.get_unique_columns(model, data))
+        unique_columns = list(cls.get_unique_columns(model, data))
+        unique_columns.remove(cls.get_primary_key_column_name(model))
         unique_data = {key: data[key] for key in data if key in unique_columns}
         node = None
         if unique_data:
@@ -2214,7 +2254,7 @@ class PrimaryKeyFactory(ModelTools):
         return val
 
     @classmethod
-    def _get_highest_autoincrement_pk_from_database(cls, model) -> int:
+    def _get_highest_autoincrement_pk_from_database(cls, model) -> Optional[int]:
         cls.is_valid_model_instance(model)
         return cls.connection.database.query(func.max(getattr(model, ModelTools.get_primary_key_column_name(model)))).scalar()
 
@@ -2243,7 +2283,6 @@ class PrimaryKeyFactory(ModelTools):
             local_item_columns = tuple(local_node.value.keys())
         [database_data.pop(column) for column in local_item_columns]
 
-
     @staticmethod
     def __replace_insert_dml_on_update(node_data: dict):
         if node_data["_delete"]:
@@ -2257,9 +2296,16 @@ class PrimaryKeyFactory(ModelTools):
             return node_data
         node_data.update({"_insert": True, "_update": False})
         return node_data
-    
-    @staticmethod
-    def __check_node_data(model: CustomModel, node_data: dict):
+
+    @classmethod
+    def __check_node_data(cls, model: CustomModel, node_data: dict):
+        primary_key = cls.get_primary_key_column_name(model)
+        if primary_key in node_data:
+            if type(node_data[primary_key]) is not cls.get_column_python_type(model, primary_key):
+                raise TypeError
+        if "_insert" not in node_data or "_update" not in node_data or "_delete" not in node_data:
+            raise ValueError
+        node_data = {column: value for column, value in node_data.items() if column not in RESERVED_WORDS}
         if type(node_data) is not dict:
             raise TypeError
         if not node_data:
