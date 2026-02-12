@@ -67,7 +67,7 @@ class ModelTools:
         return False
 
     @classmethod
-    def get_unique_columns(cls, model, data: dict) -> Iterator[str]:
+    def get_unique_columns(cls, model, data: Optional[dict] = None) -> Iterator[str]:
         """ Получить названия столбцов с UNIQUE=TRUE (их значения присутствуют в ноде) """
         cls.is_valid_model_instance(model)
         model_data = model().column_names
@@ -75,7 +75,11 @@ class ModelTools:
             del data["ui_hidden"]
         for column_name in model_data:
             if model_data[column_name]["unique"]:
-                yield column_name
+                if data is None:
+                    yield column_name
+                    continue
+                if column_name in data:
+                    yield column_name
 
     @classmethod
     def get_default_column_value_or_function(cls, model: Type[CustomModel], column_name: str) -> Optional[Any]:
@@ -743,7 +747,7 @@ class Queue(LinkedList):
                         container.append(**related_node.get_attributes())  # O(1)
         return container
 
-    def search_nodes(self, model: Type[CustomModel], negative_selection=False,
+    def search_nodes(self, model: Type[CustomModel], negative_selection=False, or_mode=True,
                      **_filter: dict[str, Union[str, int, Literal["*"]]]) -> "Queue":  # O(n)
         """
         Искать ноды по совпадениям любых полей.
@@ -751,6 +755,7 @@ class Queue(LinkedList):
         :param _filter: словарь содержащий набор полей и их значений для поиска, вместо значений допустим знак '*',
         который будет засчитывать любые значения у полей.
         :param negative_selection: режим отбора нод (найти ноды КРОМЕ ... [filter])
+        :param or_mode: Режим, когда работает правило ИЛИ при передаче нескольких стольцов и значений
         """
         QueueItem.is_valid_model_instance(model)
         items = self.__class__()
@@ -763,6 +768,7 @@ class Queue(LinkedList):
             if left_node.model.__name__ == model.__name__:  # O(u * k)
                 if not _filter and not negative_selection:
                     items.append(**left_node.get_attributes())
+                bool_value = True
                 for field_name, value in _filter.items():
                     if field_name in left_node.value:
                         if negative_selection:
@@ -771,16 +777,34 @@ class Queue(LinkedList):
                                     items.append(**left_node.get_attributes())
                                 continue
                             if not left_node.value[field_name] == value:
-                                items.append(**left_node.get_attributes())
-                                break
+                                if not or_mode:
+                                    if bool_value:
+                                        items.enqueue(**left_node.get_attributes())
+                                    else:
+                                        items.remove(model, *left_node.get_primary_key_and_value(as_tuple=True))
+                                        break
+                                else:
+                                    items.append(**left_node.get_attributes())
+                                    break
+                            else:
+                                bool_value = False
                         else:
                             if value == "*":
                                 if field_name in left_node.value:
                                     items.append(**left_node.get_attributes())
                                     continue
                             if left_node.value[field_name] == value:
-                                items.append(**left_node.get_attributes())
-                                break
+                                if not or_mode:
+                                    if bool_value:
+                                        items.enqueue(**left_node.get_attributes())
+                                    else:
+                                        items.remove(model, *left_node.get_primary_key_and_value(as_tuple=True))
+                                        break
+                                else:
+                                    items.append(**left_node.get_attributes())
+                                    break
+                            else:
+                                bool_value = False
         return items
 
     def get_node(self, model: CustomModel, **primary_key_data) -> Optional[QueueItem]:
@@ -918,7 +942,7 @@ class Queue(LinkedList):
         if not self:
             return
         foreign_key_columns = ModelTools.get_foreign_key_columns(node.model)
-        unique_fields = ModelTools.get_unique_columns(node.model, node.value)
+        unique_fields = ModelTools.get_unique_columns(node.model)
         for unique_field in unique_fields:
             if unique_field not in node.value:
                 continue
@@ -1880,16 +1904,13 @@ class ResultPaginatorMixin(AbstractResultMixin):
 class SQLAlchemyQueryManager:
     MAX_RETRIES: Union[int, Literal["no-limit"]] = MAX_RETRIES
 
-    def __init__(self, connection_path: str, nodes: "Queue"):
+    def __init__(self, nodes: "Queue"):
         def valid_node_type():
             if type(nodes) is not Queue:
                 raise ValueError
         if not isinstance(nodes, Queue):
             raise TypeError
-        if type(connection_path) is not str:
-            raise TypeError
         valid_node_type()
-        self.path = connection_path
         self._node_items = nodes
         self.remaining_nodes = Queue()  # Отложенные для следующей попытки
         self._sorted: list[Queue] = []  # [[save_point_group {pk: val,}], [save_point_group]...]
@@ -1897,8 +1918,8 @@ class SQLAlchemyQueryManager:
 
     def start(self):
         self._sort_nodes()  # Упорядочить, разбить по savepoint
-        self._manage_queries()  # Обратиться к left_node.make_query, - собрать объекты sql-иньекций
-        self._open_connection_and_push()
+        self._manage_queries()  # Обратиться к left_node.make_query, - собрать объекты sql-инъекций
+        self._push()
 
     def _manage_queries(self):
         if self._query_objects:
@@ -1909,7 +1930,7 @@ class SQLAlchemyQueryManager:
                 self._query_objects.update({left_node.index: query}) if query is not None else None
         return self._query_objects
 
-    def _open_connection_and_push(self):
+    def _push(self):
         sorted_data = self._sort_nodes()
         if not sorted_data:
             return
@@ -2046,87 +2067,104 @@ class ConnectionManager:
         cls._cache_client.close()
 
 
-class PrimaryKeyFactory(ModelTools):
+class NodeDataManager(ModelTools):
+    """ Актуализация данных, содержащихся внутри нод. Синхронизация с данными извне. """
     connection = ConnectionManager()
 
     @classmethod
-    def create_primary(cls, model, **data) -> dict:
+    def sync_node_data(cls, _model=None, _insert=False, _update=False, _delete=False, **data) -> dict:
         """ Синхронизация данных нод из внешних расположений для одной ноды. """
-        cls.is_valid_model_instance(model)
+        cls.is_valid_model_instance(_model)
         if type(data) is not dict:
             raise TypeError
-        cls.__check_node_data(model, data)
-        primary_key = cls.get_primary_key_column_name(model)
-        pk_from_current_node = cls._select_primary_key_value_from_node_data(model, data)
-        data = cls._update_node_data_from_database_by_unique_column(model, data)
-        if pk_from_current_node:
-            data = cls._update_node_data_from_local_nodes_by_unique_column(model, data)
-        if data["_insert"]:
-            if primary_key in data:
+        data.update({"_insert": _insert, "_update": _update, "_delete": _delete})
+        cls.__check_node_data(_model, **data)
+        data, is_exist = cls._update_node_data_from_database_by_unique_column(_model, data)
+        data = cls._update_node_data_from_local_nodes_by_unique_column(_model, data)
+        if is_exist:
+            if not _delete:
+                cls.__change_dml(data, update=True)
+            return data
+        primary_key = cls.get_primary_key_column_name(_model)
+        pk_from_received_data = cls._select_primary_key_value_from_node_data(_model, data)
+        if pk_from_received_data is not None:
+            data, is_exist = cls._update_node_data_from_database_by_pk(_model, pk_from_received_data, data)
+            data = cls._update_node_data_from_local_by_pk(_model, {primary_key: pk_from_received_data}, data)
+            if is_exist:
+                if not _delete:
+                    cls.__change_dml(data, update=True)
+            return data
+        if _insert:
+            if cls.is_autoincrement_primary_key(_model):
+                pk_value_db = cls._get_highest_autoincrement_pk_from_database(_model) or 0
+                pk_value_local = cls._get_highest_autoincrement_pk_from_local(_model) or 0
+                data.update({primary_key: pk_value_local + pk_value_db + 1})
                 return data
-            default_value = cls.get_default_column_value_or_function(model, primary_key)
+            default_value = cls.get_default_column_value_or_function(_model, primary_key)
             if default_value is not None:
                 data.update({primary_key: default_value.arg(None)})
                 return data
-            if cls.is_autoincrement_primary_key(model):
-                pk_value_db = cls._get_highest_autoincrement_pk_from_database(model) or 0
-                pk_value_local = cls._get_highest_autoincrement_pk_from_local(model) or 0
-                data.update({primary_key: pk_value_local + pk_value_db + 1})
-                return data
-            raise NodePrimaryKeyError
-        if data["_update"]:
-            pass
-        if cls.is_autoincrement_primary_key(model):
-            pk_from_db = cls._get_highest_autoincrement_pk_from_database(model)
-
-            if pk_from_current_node is not None:
-                if pk_from_db is not None:
-                    if pk_from_db >= pk_from_current_node[primary_key]:
-                        cls._update_node_data_from_database_by_pk(model, pk_from_current_node, data)
-            else:
-                data.update({primary_key: pk_from_db + 1})
-            return data
-        default_value = cls.get_default_column_value_or_function(model, primary_key)
-        if default_value is not None:
-            data.update({primary_key: default_value.arg(None)})
-            return data
-        if cls.is_autoincrement_primary_key(model):
-            pk_value_db = cls._get_highest_autoincrement_pk_from_database(model) or 0
-            pk_value_local = cls._get_highest_autoincrement_pk_from_local(model) or 0
-            data.update({primary_key: pk_value_local + pk_value_db + 1})
-            return data
         raise NodePrimaryKeyError
 
     @classmethod
-    def create_primary_key_many(cls, model, data: list[dict]) -> list[dict]:
+    def sync_node_data_many(cls, model, data: list[dict]) -> Iterator[dict]:
         """ Синхронизация данных нод из внешних расположений для одной ноды.
         Все ноды должны принадлежать одной и той же таблице. """
+        def remove_item_from_data_if_in_exist_items(items, exist_items, primary_key):
+            for i, current_data in enumerate(items):
+                pk = current_data.get(primary_key, None)
+                if pk is None:
+                    continue
+                if pk in exist_items:
+                    yield current_data
+                    del items[i]
         if not cls.is_valid_model_instance(model):
             raise TypeError
         if type(data) is not list:
             raise TypeError
-        [cls.__check_node_data(model, n) for n in data]
+        [cls.__check_node_data(model, **n) for n in data]
         primary_key_column_name = cls.get_primary_key_column_name(model)
-        primary_keys_from_current_local_data = []
+        data, exist_item_pk = cls._update_node_data_from_database_by_unique_column_multiple(model, data)
+        cls._update_node_data_from_local_by_unique_column_multiple(model, data)
+        for n in remove_item_from_data_if_in_exist_items(data, exist_item_pk, primary_key_column_name):
+            if n["_insert"]:
+                cls.__change_dml(n, update=True)
+            yield n
         if cls.is_autoincrement_primary_key(model):
             autoincrement_value_db = cls._get_highest_autoincrement_pk_from_database(model)
             autoincrement_value_local = cls._get_highest_autoincrement_pk_from_local(model)
             current_pk_counter = autoincrement_value_db + autoincrement_value_local + 1
-            for node_data in data:
+            for i, node_data in enumerate(data):
+                if not node_data["_insert"]:
+                    continue
                 if node_data[primary_key_column_name] in range(current_pk_counter - 1):
-                    cls.__replace_insert_dml_on_update(node_data)
+                    cls.__change_dml(node_data, update=True)
                 else:
                     node_data[primary_key_column_name] = current_pk_counter
                     current_pk_counter += 1
-            return data
+                yield node_data
+                del data[i]
+        data, exist_item_pk = cls._update_node_data_from_database_by_pk_multiple(model, data)
+        for n in remove_item_from_data_if_in_exist_items(data, exist_item_pk, primary_key_column_name):
+            if n["_insert"]:
+                cls.__change_dml(n, update=True)
+            yield n
+        sql_procedure = cls.get_default_column_value_or_function(model, primary_key_column_name)
         for node_data in data:
             value = node_data.get(primary_key_column_name, None)
             if value is None:
-                node_data[primary_key_column_name] = cls.get_default_column_value_or_function(model, primary_key_column_name)
-
+                if node_data["_update"]:
+                    cls.__change_dml(node_data, insert=True)
+                if sql_procedure is None:
+                    raise NodePrimaryKeyError
+                node_data[primary_key_column_name] = sql_procedure.arg(None)
+            else:
+                if not node_data["_delete"]:
+                    cls.__change_dml(node_data, update=True)
+            yield node_data
 
     @classmethod
-    def _update_node_data_from_database_by_pk(cls, model, primary_key: dict, data: dict) -> dict:
+    def _update_node_data_from_database_by_pk(cls, model, primary_key: dict, data: dict) -> tuple[dict, bool]:
         cls.is_valid_model_instance(model)
         if type(primary_key) is not dict:
             raise TypeError
@@ -2141,14 +2179,24 @@ class PrimaryKeyFactory(ModelTools):
             cls.__remove_local_data_from_database_data(model, primary_key, select_result)
             select_result.update(primary_key)
             select_result.update(data)
-            select_result = cls.__replace_insert_dml_on_update(select_result)
-            return cls.__clear_node_data(model, select_result)
-        data = cls.__replace_insert_dml_on_insert(data)
+            return cls.__clear_node_data(model, select_result), True
+        return data, False
+
+    @classmethod
+    def _update_node_data_from_local_by_pk(cls, model, primary_key: dict, data: dict):
+        node = cls.connection.items.get_node(model, **primary_key)
+        if node is None:
+            return data
+        data.update(node.value)
         return data
 
     @classmethod
     def _update_node_data_from_database_by_pk_multiple(cls, model, local_data: list[dict]) -> tuple[list[dict], set]:
         cls.is_valid_model_instance(model)
+        if type(local_data) is not list:
+            raise TypeError
+        if not local_data:
+            return local_data, set()
         [cls.__check_node_data(model, node_data) for node_data in local_data]
         pk_data = []
         primary_key = cls.get_primary_key_column_name(model)
@@ -2166,7 +2214,6 @@ class PrimaryKeyFactory(ModelTools):
                     cls.__remove_local_data_from_database_data(model, {primary_key: val}, db_data)
                     db_data.update({primary_key: val})
                     db_data.update(current_local_item)
-                    db_data = cls.__replace_insert_dml_on_update(db_data)
                     local_data[index] = db_data
                     pk_from_db.add(val)
         return local_data, pk_from_db
@@ -2174,7 +2221,11 @@ class PrimaryKeyFactory(ModelTools):
     @classmethod
     def _update_node_data_from_database_by_unique_column_multiple(cls, model, local_data: list[dict]) -> tuple[list[dict], set]:
         cls.is_valid_model_instance(model)
-        [cls.__check_node_data(model, node_data) for node_data in local_data]
+        if type(local_data) is not list:
+            raise TypeError
+        if not local_data:
+            return local_data, set()
+        [cls.__check_node_data(model, **node_data) for node_data in local_data]
         pk_data = []
         for current_data in local_data:
             unique_data = cls.get_unique_columns(model, current_data)
@@ -2192,13 +2243,34 @@ class PrimaryKeyFactory(ModelTools):
                     cls.__remove_local_data_from_database_data(model, {primary_key: val}, db_data)
                     db_data.update({primary_key: val})
                     db_data.update(current_local_item)
-                    db_data = cls.__replace_insert_dml_on_update(db_data)
                     local_data[index] = db_data
                     pk_from_db.add(val)
         return local_data, pk_from_db
 
     @classmethod
-    def _update_node_data_from_database_by_unique_column(cls, model, data: dict) -> dict:
+    def _update_node_data_from_local_by_unique_column_multiple(cls, model, local_data: list[dict]) -> None:
+        cls.is_valid_model_instance(model)
+        if not isinstance(local_data, list):
+            raise TypeError
+        if not local_data:
+            return
+        [cls.__check_node_data(model, node_data) for node_data in local_data]
+        for index, current_data in enumerate(local_data):
+            unique_data = cls.get_unique_columns(model, current_data)
+            if not unique_data:
+                continue
+            nodes = cls.connection.items.search_nodes(model, **{name: current_data[name] for name in unique_data},
+                                                      or_mode=False)
+            if not nodes:
+                continue
+            if len(nodes) > 1:
+                raise NodeColumnError
+            data = nodes[0].value
+            data.update(current_data)
+            local_data[index] = data
+
+    @classmethod
+    def _update_node_data_from_database_by_unique_column(cls, model, data: dict) -> tuple[dict, bool]:
         cls.is_valid_model_instance(model)
         if not isinstance(data, dict):
             raise TypeError
@@ -2215,9 +2287,8 @@ class PrimaryKeyFactory(ModelTools):
             cls.__remove_local_data_from_database_data(model, primary_key_data, select_result)
             select_result.update(primary_key_data)
             select_result.update(data)
-            select_result = cls.__replace_insert_dml_on_update(select_result)
-            return cls.__clear_node_data(model, select_result)
-        return data
+            return cls.__clear_node_data(model, select_result), True
+        return data, False
 
     @classmethod
     def _update_node_data_from_local_nodes_by_unique_column(cls, model, data: dict):
@@ -2226,7 +2297,7 @@ class PrimaryKeyFactory(ModelTools):
         unique_data = {key: data[key] for key in data if key in unique_columns}
         node = None
         if unique_data:
-            node = cls.connection.items.search_nodes(model, **unique_data)
+            node = cls.connection.items.search_nodes(model, **unique_data, or_mode=False)
         if not node:
             return data
         value = node[0].value
@@ -2267,9 +2338,6 @@ class PrimaryKeyFactory(ModelTools):
             value = data.get(name, None)
             if value is not None:
                 result.update({name: value})
-        for key, value in data.items():
-            if key in RESERVED_WORDS:
-                result.update({key: value})
         return result
 
     @classmethod
@@ -2283,35 +2351,29 @@ class PrimaryKeyFactory(ModelTools):
             local_item_columns = tuple(local_node.value.keys())
         [database_data.pop(column) for column in local_item_columns]
 
-    @staticmethod
-    def __replace_insert_dml_on_update(node_data: dict):
-        if node_data["_delete"]:
-            return node_data
-        node_data.update({"_insert": False, "_update": True})
-        return node_data
-
-    @staticmethod
-    def __replace_insert_dml_on_insert(node_data: dict):
-        if node_data["_delete"]:
-            return node_data
-        node_data.update({"_insert": True, "_update": False})
-        return node_data
-
     @classmethod
-    def __check_node_data(cls, model: CustomModel, node_data: dict):
+    def __check_node_data(cls, model: CustomModel, _insert=False, _update=False, _delete=False, **node_data):
         primary_key = cls.get_primary_key_column_name(model)
         if primary_key in node_data:
             if type(node_data[primary_key]) is not cls.get_column_python_type(model, primary_key):
                 raise TypeError
-        if "_insert" not in node_data or "_update" not in node_data or "_delete" not in node_data:
-            raise ValueError
-        node_data = {column: value for column, value in node_data.items() if column not in RESERVED_WORDS}
-        if type(node_data) is not dict:
+        if type(_insert) is not bool or not isinstance(_update, bool) or type(_delete) is not bool:
             raise TypeError
-        if not node_data:
+        if not sum((_insert, _update, _delete,)) == 1:
             raise ValueError
-        if frozenset(node_data) - frozenset(model().column_names):
-            raise ValueError(f"В словаре data обнаружены столбцы, которые не относятся к {model.__name__}.")
+        invalid_data = [column for column in node_data if column in RESERVED_WORDS]
+        if invalid_data:
+            raise ValueError(f"В переданных данных присутствуют зарезервированные слова {', '.join(invalid_data)}")
+
+    @staticmethod
+    def __change_dml(node_data, insert=False, update=False, delete=False):
+        t = (insert, update, delete,)
+        if any(map(lambda i: not isinstance(i, bool), t)):
+            raise TypeError
+        if not sum(t) == 1:
+            raise ValueError
+        node_data.update({"_delete": False, "_insert": False, "_update": False})
+        node_data.update({"_delete": delete, "_update": update, "_insert": insert})
 
 
 class Tool(ModelTools):
@@ -2359,7 +2421,7 @@ class Tool(ModelTools):
         attrs = {"_model": model, "_ready": _ready,
                  "_insert": _insert, "_update": _update,
                  "_delete": _delete}
-        attrs.update(PrimaryKeyFactory.create_primary(model, **{**value, **attrs}))
+        attrs.update(NodeDataManager.sync_node_data(**{**value, **attrs}))
         items.enqueue(**attrs)
         cls.__set_cache(items)
         cls._timer = cls._init_timer()
@@ -2810,23 +2872,32 @@ class Tool(ModelTools):
         return items[0].ready
 
     @classmethod
-    def release(cls) -> None:
+    def release(cls):
         """
         Этот метод стремится высвободить очередь сохраняемых объектов,
         путём итерации по ним, и попыткой сохранить в базу данных.
         :return: None
         """
-        def actualize_node_data(remaining_nodes: Queue):
-            """ Обновить данные нод, которые не удалось закоммитить, из базы данных """
-            updated_remaining_nodes = Queue()
-            for node in remaining_nodes:
-                node_data = PrimaryKeyFactory.create_primary(node.model, **node.get_attributes())
-                updated_remaining_nodes.enqueue(**node_data)
-            return updated_remaining_nodes
+        def group_nodes_by_table_names(nodes: Queue) -> dict[str, Queue]:
+            result = {}
+            for node in nodes:
+                current_nodes = result.get(node.model.__name__, None)
+                if current_nodes is None:
+                    t = type(nodes)()
+                    t.append(**node.get_attributes())
+                    result.update({node.model.__name__: t})
+                else:
+                    current_nodes.append(**node.get_attributes())
+            return result
         database_adapter = SQLAlchemyQueryManager(DATABASE_PATH, cls.connection.items)
         database_adapter.start()
-        cls.__set_cache(actualize_node_data(database_adapter.remaining_nodes))
-        sys.exit()
+        if not database_adapter.remaining_nodes:
+            return
+        new_queue = Queue()
+        for model_name, node_group in group_nodes_by_table_names(database_adapter.remaining_nodes).items():
+            [new_queue.append(ModelTools.import_model(model_name), **data)
+             for data in NodeDataManager.sync_node_data_many(model_name, node_group)]
+        cls.__set_cache(new_queue)
 
     @classmethod
     def _init_timer(cls):
@@ -2905,8 +2976,8 @@ class Tool(ModelTools):
 
     @classmethod
     def __set_cache(cls, nodes):
-        if nodes is None:
-            raise TypeError("Покытка установить в кеш None вместо ORMQueue. Это недопустимо")
+        if type(nodes) is not Queue:
+            raise TypeError
         cls.connection.cache.set("ORMItems", nodes, cls.CACHE_LIFETIME_HOURS)
 
     @staticmethod
