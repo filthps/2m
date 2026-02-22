@@ -71,8 +71,9 @@ class ModelTools:
         """ Получить названия столбцов с UNIQUE=TRUE (их значения присутствуют в ноде) """
         cls.is_valid_model_instance(model)
         model_data = model().column_names
-        if "ui_hidden" in data:
-            del data["ui_hidden"]
+        if data is not None:
+            if "_ui_hidden" in data:
+                del data["_ui_hidden"]
         for column_name in model_data:
             if model_data[column_name]["unique"]:
                 if data is None:
@@ -1086,17 +1087,20 @@ class ResultORMCollection:
     CONTAINER = ServiceResultOrmContainer  # Тип, хранимый внутри, имутабелен
 
     def __init__(self, collection: "ServiceOrmContainer", prefix_mode=None):
-        def is_valid():
-            if type(self.__collection) is not ServiceOrmContainer:
+        def is_valid(items):
+            if type(items) is not ServiceOrmContainer:
                 raise TypeError
             if type(self._prefix_mode) is not str:
                 raise TypeError
             if self._prefix_mode not in ("auto", "add", "no-prefix",):
                 raise ValueError
-        self.__collection = collection
+            if not items:
+                return
+            if type(items[0]) is not ServiceOrmItem:
+                raise TypeError
         self._prefix_mode = prefix_mode if prefix_mode is not None else self.ADD_TABLE_NAME_PREFIX
-        is_valid()
-        self.__collection = self.__convert_node_data(self.__collection)
+        is_valid(collection)
+        self.__collection = self.__convert_node_data(collection)
         self.remove_model_prefix()
         if self._prefix_mode == "add":
             self.add_model_name_prefix()
@@ -1110,7 +1114,7 @@ class ResultORMCollection:
         return self._prefix_mode
 
     @property
-    def get_all_visible_items(self):
+    def all_visible_items(self):
         new_items = self.__collection.__class__()
         [new_items.append(**node.get_attributes())
          if not node.hidden else None
@@ -1167,7 +1171,7 @@ class ResultORMCollection:
                 if node.model.__name__ == other_node.model.__name__:
                     continue
                 names_to_set_prefix = set(node.value).intersection(set(other_node.value))
-                names_to_set_prefix.remove("ui_hidden")
+                names_to_set_prefix.remove("_ui_hidden")
                 if not names_to_set_prefix:
                     continue
                 node.add_model_name_prefix(tuple(names_to_set_prefix))
@@ -1183,7 +1187,7 @@ class ResultORMCollection:
         return self.__collection.__iter__()
 
     def __iter__(self):
-        return iter(self.get_all_visible_items)
+        return iter(self.all_visible_items)
 
     def __bool__(self):
         try:
@@ -1227,7 +1231,7 @@ class ResultORMCollection:
     def __convert_node_data(cls, collection: ServiceOrmContainer):
         new_collection = cls.CONTAINER()
         [new_collection.append(node.model, node.get_primary_key_and_value(),
-                               **({"ui_hidden": True
+                               **({"_ui_hidden": True
                                   if node.type == "_delete" else False}),
                                **node.value)
          for node in collection]
