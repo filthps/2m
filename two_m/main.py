@@ -14,6 +14,9 @@ RELEASE_INTERVAL_SECONDS: float = 20.0
 CACHE_LIFETIME_HOURS: int = 1 * 60 * 60
 RETRYING_CLIENT_ATTEMPTS: int = 10
 RETRYING_CLIENT_RETRY_DELAY: float = 0.3
+# NodeDataManager
+IGNORE_NODE_PRIMARY_KEY_ERROR: bool = False
+INCOMING_DATA_VALIDATION_LEVEL: typing.Literal["filter", "strong"] = "strong"
 # SQLAlchemyQueryManager
 MAX_RETRIES: typing.Union[int, typing.Literal["no-limit"]] = "no-limit"
 # ResultORMCollection

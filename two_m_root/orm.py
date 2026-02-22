@@ -40,7 +40,8 @@ from two_m_root.exceptions import *
 from two_m_root.database.postgres.exceptions import DatabaseException
 from two_m_root.conf import RESERVED_WORDS, CustomModel
 from two_m.main import MEMCACHE_PATH, DATABASE_PATH, RELEASE_INTERVAL_SECONDS, CACHE_LIFETIME_HOURS, \
-    MAX_RETRIES, WRAP_ITEM_MAX_LENGTH, ADD_TABLE_NAME_PREFIX  # from user's package
+    MAX_RETRIES, WRAP_ITEM_MAX_LENGTH, ADD_TABLE_NAME_PREFIX, INCOMING_DATA_VALIDATION_LEVEL, \
+    IGNORE_NODE_PRIMARY_KEY_ERROR  # from user's package
 
 
 class ModelTools:
@@ -2073,6 +2074,11 @@ class ConnectionManager:
 
 class NodeDataManager(ModelTools):
     """ Актуализация данных, содержащихся внутри нод. Синхронизация с данными извне. """
+    IGNORE_NODE_PRIMARY_KEY_ERROR = IGNORE_NODE_PRIMARY_KEY_ERROR  # Возбуждать или не возбуждать исключение,
+    # если не удалось определить значение первичного ключа для будущей ноды. В противном случае вернуть пустой словарь,
+    # вместо данных
+    INCOMING_DATA_VALIDATION_LEVEL = INCOMING_DATA_VALIDATION_LEVEL  # Игнорировать попытку установить в ноду несуществующий столбец,
+    # или сделать валидацию более строгой
     connection = ConnectionManager()
 
     @classmethod
@@ -2080,6 +2086,8 @@ class NodeDataManager(ModelTools):
         """ Синхронизация данных нод из внешних расположений для одной ноды. """
         cls.is_valid_model_instance(_model)
         if type(data) is not dict:
+            raise TypeError
+        if type(cls.IGNORE_NODE_PRIMARY_KEY_ERROR) is not bool:
             raise TypeError
         data.update({"_insert": _insert, "_update": _update, "_delete": _delete})
         cls.__check_node_data(_model, **data)
@@ -2098,6 +2106,10 @@ class NodeDataManager(ModelTools):
                 if not _delete:
                     cls.__change_dml(data, update=True)
             return data
+        if _update:
+            if pk_from_received_data is None:
+                if not cls.IGNORE_NODE_PRIMARY_KEY_ERROR:
+                    raise NodePrimaryKeyError
         if _insert:
             if cls.is_autoincrement_primary_key(_model):
                 pk_value_db = cls._get_highest_autoincrement_pk_from_database(_model) or 0
@@ -2108,7 +2120,16 @@ class NodeDataManager(ModelTools):
             if default_value is not None:
                 data.update({primary_key: default_value.arg(None)})
                 return data
-        raise NodePrimaryKeyError
+        if not cls.IGNORE_NODE_PRIMARY_KEY_ERROR:
+            raise NodePrimaryKeyError
+        if cls.INCOMING_DATA_VALIDATION_LEVEL == "strong":
+            exist_model_column_names = _model().column_names
+            for column_name, value in cls.__clear_node_data(_model, data).items():
+                if column_name not in exist_model_column_names:
+                    raise NodeColumnError(column_name)
+                if not isinstance(value, ModelTools.get_column_python_type(_model, column_name)):
+                    raise NodeColumnValueError
+        return {}
 
     @classmethod
     def sync_node_data_many(cls, model, data: list[dict]) -> Iterator[dict]:
@@ -2127,6 +2148,8 @@ class NodeDataManager(ModelTools):
         if type(data) is not list:
             raise TypeError
         [cls.__check_node_data(model, **n) for n in data]
+        if type(cls.IGNORE_NODE_PRIMARY_KEY_ERROR) is not bool:
+            raise TypeError
         primary_key_column_name = cls.get_primary_key_column_name(model)
         data, exist_item_pk = cls._update_node_data_from_database_by_unique_column_multiple(model, data)
         cls._update_node_data_from_local_by_unique_column_multiple(model, data)
@@ -2160,6 +2183,8 @@ class NodeDataManager(ModelTools):
                 if node_data["_update"]:
                     cls.__change_dml(node_data, insert=True)
                 if sql_procedure is None:
+                    if cls.IGNORE_NODE_PRIMARY_KEY_ERROR:
+                        continue
                     raise NodePrimaryKeyError
                 node_data[primary_key_column_name] = sql_procedure.arg(None)
             else:
@@ -2174,9 +2199,6 @@ class NodeDataManager(ModelTools):
             raise TypeError
         if type(data) is not dict:
             raise TypeError
-        pk = cls._select_primary_key_value_from_node_data(model, data)
-        if not pk == primary_key:
-            raise NodePrimaryKeyError
         select_result: dict = cls.connection.database.query(model).filter_by(**primary_key).all()
         if select_result:
             select_result = select_result[0].__dict__
@@ -2279,7 +2301,6 @@ class NodeDataManager(ModelTools):
         if not isinstance(data, dict):
             raise TypeError
         unique_columns = list(cls.get_unique_columns(model, data))
-        unique_columns.remove(cls.get_primary_key_column_name(model))                      
         unique_data = {key: data[key] for key in data if key in unique_columns}
         select_result = None
         if unique_data:
@@ -2297,7 +2318,6 @@ class NodeDataManager(ModelTools):
     @classmethod
     def _update_node_data_from_local_nodes_by_unique_column(cls, model, data: dict):
         unique_columns = list(cls.get_unique_columns(model, data))
-        unique_columns.remove(cls.get_primary_key_column_name(model))
         unique_data = {key: data[key] for key in data if key in unique_columns}
         node = None
         if unique_data:
@@ -2334,13 +2354,21 @@ class NodeDataManager(ModelTools):
         return cls.connection.database.query(func.max(getattr(model, ModelTools.get_primary_key_column_name(model)))).scalar()
 
     @classmethod
-    def __clear_node_data(cls, model, data):
+    def __clear_node_data(cls, model, data) -> dict:
         """ Отфильтровать возможные лишние данные при получении данных из бд """
-        cls.is_valid_model_instance(model)
+        if cls.INCOMING_DATA_VALIDATION_LEVEL not in ("filter", "strong",):
+            raise ValueError
         result = {}
-        for name in model().column_names:
-            value = data.get(name, None)
-            if value is not None:
+        cls.is_valid_model_instance(model)
+        if cls.INCOMING_DATA_VALIDATION_LEVEL == "filter":
+            for name in model().column_names:
+                value = data.get(name, None)
+                if value is not None:
+                    result.update({name: value})
+        if cls.INCOMING_DATA_VALIDATION_LEVEL == "strong":
+            for name, value in data.items():
+                if name in RESERVED_WORDS:
+                    continue
                 result.update({name: value})
         return result
 
@@ -2365,9 +2393,8 @@ class NodeDataManager(ModelTools):
             raise TypeError
         if not sum((_insert, _update, _delete,)) == 1:
             raise ValueError
-        invalid_data = [column for column in node_data if column in RESERVED_WORDS]
-        if invalid_data:
-            raise ValueError(f"В переданных данных присутствуют зарезервированные слова {', '.join(invalid_data)}")
+        if not all((isinstance(v, (int, str, type(None))) for v in node_data.values())):
+            raise NodeColumnValueError
 
     @staticmethod
     def __change_dml(node_data, insert=False, update=False, delete=False):
@@ -2419,13 +2446,14 @@ class Tool(ModelTools):
         if isinstance(_model, str):
             model = ModelTools.import_model(_model)
         cls.is_valid_model_instance(model)
-        if not all((isinstance(v, (int, str, type(None))) for v in value.values())):
-            raise NodeColumnValueError
         items: Queue = cls.connection.items
         attrs = {"_model": model, "_ready": _ready,
                  "_insert": _insert, "_update": _update,
                  "_delete": _delete}
-        attrs.update(NodeDataManager.sync_node_data(**{**value, **attrs}))
+        actual_node_data = NodeDataManager.sync_node_data(**{**value, **attrs})
+        if not actual_node_data:
+            return
+        attrs.update(actual_node_data)
         items.enqueue(**attrs)
         cls.__set_cache(items)
         cls._timer = cls._init_timer()
@@ -2893,7 +2921,7 @@ class Tool(ModelTools):
                 else:
                     current_nodes.append(**node.get_attributes())
             return result
-        database_adapter = SQLAlchemyQueryManager(DATABASE_PATH, cls.connection.items)
+        database_adapter = SQLAlchemyQueryManager(cls.connection.items)
         database_adapter.start()
         if not database_adapter.remaining_nodes:
             return
