@@ -3267,41 +3267,41 @@ class AbstractResult:
             return super().get_local_nodes(*args, **kwargs)
 
     @abstractmethod
-    def items(self):
+    def items(self) -> Union[tuple[ResultORMCollection], ResultORMCollection]:
         """ Возможность производить итерации по содержимому. см __iter__ """
-        _ = self.get_nodes_from_database()
-        _ = self.get_local_nodes()
-        self._merge(_, _)
         ...
         return self._create_output(...)
 
     @abstractmethod
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Union[tuple[ResultORMCollection], ResultORMCollection]]:
         """ Возможность производить итерации по содержимому. """
-        _ = self.get_nodes_from_database()
-        _ = self.get_local_nodes()
-        self._merge(_, _)
         ...
         return self._create_output(...)
 
     @abstractmethod
-    def _merge(self, *args, **kwargs):
+    def _merge(self, *args, **kwargs) -> Union[tuple[ServiceResultOrmContainer], ServiceResultOrmContainer]:
         """ Функция, которая делает репликацию нод из кеша поверх нод из бд """
-        pass
-
-    @abstractmethod
-    def _perform_create_output(self):
-        """ Дополнительная функция для каких-нибудь классов-миксинов: сортировка, пагинатор, срез итп """
-        _ = self._merge(...)
         ...
         return self._create_output(...)
 
     @abstractmethod
-    def _create_output(self, *args, **kwargs) -> ResultORMCollection:
+    def visible_items(self):
+        ...
+        return self._create_output(...)
+
+    @staticmethod
+    @abstractmethod
+    def _create_output(self, data) -> Union[tuple[ResultORMCollection], ResultORMCollection]:
         """ Сформировать результирующую последовательность соответственного типа,
         доступную для использования конечным пользователем """
         ...
         return ...
+
+    @abstractmethod
+    def _filter_items(self, data) -> Union[tuple[ServiceResultOrmContainer], ServiceResultOrmContainer]:
+        """ Отфильтровать ноды или коллекции нод, если в них присутствуют скрытые ноды.
+        Обычно удобно скрывать ноды с dml _delete - True/ """
+        ...
 
 
 class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
