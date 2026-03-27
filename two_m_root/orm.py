@@ -1081,6 +1081,10 @@ class ServiceResultOrmContainer(ServiceOrmContainer):
     """ Контейнер для хранения выводимых результатов """
     LinkedListItem = ResultORMItem
 
+    @property
+    def has_hidden_nodes(self):
+        return any(map(lambda node: node.hidden, self))
+
 
 class ResultORMCollection:
     """ Иммутабельная коллекция с набором результата, закрытая на добавление новых элементов. """
@@ -1113,14 +1117,6 @@ class ResultORMCollection:
     @property
     def prefix(self):
         return self._prefix_mode
-
-    @property
-    def all_visible_items(self):
-        new_items = self.__collection.__class__()
-        [new_items.append(**node.get_attributes())
-         if not node.hidden else None
-         for node in self.__collection]
-        return new_items
 
     @property
     def hash_by_pk(self):
@@ -1183,12 +1179,8 @@ class ResultORMCollection:
     def search_nones(self, model, **kwargs):
         return self.__collection.search_nodes(model, **kwargs)
 
-    def all_nodes(self) -> Iterator:
-        """ Для служебного пользования. Для UI использовать iter """
-        return self.__collection.__iter__()
-
     def __iter__(self):
-        return iter(self.all_visible_items)
+        return iter(self.__collection)
 
     def __bool__(self):
         try:
@@ -1634,14 +1626,6 @@ class OrderByMixin(AbstractResultMixin):
         self._reversed = decr if decr is not None else self.REVERSED
         self._is_sort = True
 
-    @abstractmethod
-    def _sort_items(self, items, int_sort: Union[bool, str] = False,
-                   string_sort: Union[bool, str] = False,
-                   by_length=False, by_alphabet=False, by_create_time=False,
-                   reversed_=False):
-        """ Произвести сортировку контейнеров содержимого согласно переданным параметрам """
-        ...
-
     def get_nodes_from_database(self, **kwargs):
         if self._is_sort:
             kwargs.update(self._create_params_to_sort_items())
@@ -1661,6 +1645,14 @@ class OrderByMixin(AbstractResultMixin):
                 return self._sort_items(nodes, **kwargs)
         nodes = self._get_local_nodes(**kwargs)
         return self._sort_items(nodes, **kwargs)
+
+    @abstractmethod
+    def _sort_items(self, items, int_sort: Union[bool, str] = False,
+                   string_sort: Union[bool, str] = False,
+                   by_length=False, by_alphabet=False, by_create_time=False,
+                   reversed_=False):
+        """ Произвести сортировку контейнеров содержимого согласно переданным параметрам """
+        ...
 
     def _create_params_to_sort_items(self) -> dict:
         """ Создать параметры, передаваемые в геттер данных, на основе параметров,
@@ -1748,7 +1740,7 @@ class OrderBySingleResultMixin(OrderByMixin):
 
     def order_by(self, by_column_name: Optional[str] = None, by_primary_key: Optional[bool] = None,
                  by_create_time: Optional[bool] = None, length: bool = False, alphabet: bool = False,
-                 decr: bool = None):
+                 decr: Optional[bool] = None):
         self._is_valid_order_by_params(self._model, by_column_name, by_primary_key, by_create_time, length, alphabet,
                                        decr)
         super().order_by(by_column_name, by_primary_key, by_create_time, length, alphabet,
@@ -1761,13 +1753,13 @@ class OrderBySingleResultMixin(OrderByMixin):
         self.__is_valid_data(items)
         sorted_nodes = None
         if string_sort:
-            sorted_nodes = LetterSortSingleNodes(self._model, string_sort, items, reverse=True if reversed_ else False)
+            sorted_nodes = LetterSortSingleNodes(self._model, string_sort, items, reverse=reversed_)
             if by_alphabet:
                 return sorted_nodes.sort_by_alphabet()
             if by_length:
                 return sorted_nodes.sort_by_string_length()
         if int_sort:
-            sorted_nodes = NumberSortSingleNodes(self._model, int_sort, items, reverse=True if reversed_ else False)
+            sorted_nodes = NumberSortSingleNodes(self._model, int_sort, items, reverse=reversed_)
             return sorted_nodes.sort()
         if by_create_time:
             sorted_nodes = ...
@@ -1793,9 +1785,8 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
         [ModelTools.is_valid_model_instance(model) for model in self._models]
 
     def order_by(self, model: CustomModel, by_column_name: Optional[str] = None,
-                 by_primary_key=False,
-                 by_create_time=False, length=False, alphabet=False,
-                 decr=None):
+                 by_primary_key: bool = False, by_create_time: bool = False, length: bool = False,
+                 alphabet: bool = False, decr: Optional[bool] = None):
         self.is_valid_model_instance(model)
         self._is_valid_order_by_params(model, by_column_name, by_primary_key, by_create_time, length, alphabet,
                                        decr)
@@ -3445,6 +3436,8 @@ class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
 
     def _sort_items(self, data, **kwargs):
         """ Окончательная сортировка. После смешивания данных из базы данных и локальных данных """
+        if not self._is_sort:
+            return data
         if hasattr(self, "_sort_items"):
             return super()._sort_items(data, **kwargs)
         return data
@@ -3695,11 +3688,11 @@ class JoinSelectResult(ResultPaginatorMixin, BaseResult, OrderByJoinResultMixin,
         local_items = list(self.get_local_nodes())
         all_nodes_from_database = list(self.get_nodes_from_database())
         if not local_items:
-            return tuple(ResultORMCollection(item) for item in all_nodes_from_database)
+            return all_nodes_from_database
         if not all_nodes_from_database:
-            return tuple(ResultORMCollection(item) for item in local_items)
-        check_input_items(local_items)  # todo fixit
-        check_input_items(all_nodes_from_database)  # todo fixit
+            return local_items
+        check_input_items(local_items)
+        check_input_items(all_nodes_from_database)
         filter_relationship_preliminarily(all_nodes_from_database, local_items)
         filter_relationship_final(all_nodes_from_database, local_items)
         result_data = merge(all_nodes_from_database, local_items)
