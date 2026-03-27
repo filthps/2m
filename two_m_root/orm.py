@@ -3391,8 +3391,18 @@ class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
 
     @property
     def items(self):
-        self.__merged_data = self._merge()
+        merged_data = self._merge()
+        merged_data = self._sort_items(merged_data)
+        self.__merged_data = self._create_output(merged_data)
         return self.__merged_data
+
+    @property
+    def visible_items(self):
+        merged_data = self._merge()
+        sorted_data = self._sort_items(merged_data)
+        filtered_data = self._filter_items(sorted_data)
+        self.__merged_data = self._create_output(sorted_data)
+        return self._create_output(filtered_data)
 
     @property
     def pointer(self):
@@ -3405,8 +3415,10 @@ class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
         self._pointer = Pointer(self, wrap_items)
 
     def __iter__(self):
-        self.__merged_data = self._merge()
-        return iter(self.__merged_data)
+        merged_data = self._merge()
+        merged_data = self._sort_items(merged_data)
+        self.__merged_data = self._create_output(merged_data)
+        return self.__merged_data.__iter__()
 
     def __len__(self):
         return sum((1 for _ in self))
@@ -3492,14 +3504,22 @@ class Result(ResultPaginatorMixin, BaseResult, OrderBySingleResultMixin, ModelTo
         [output.enqueue(**node.get_attributes())
          for collection in (database_items, local_items,) for node in collection]
         output = self._sort_items(output, **self._create_params_to_sort_items())
-        return self._create_output(output)
+        return output
 
     @staticmethod
-    def _create_output(data: ServiceOrmContainer):
+    def _create_output(data):
         """ Упаковать результат,
         готовый для использования конечным пользователем,
         в специальный защищённый контейнер """
         return ResultORMCollection(data)
+
+    def _filter_items(self):
+        data = self.items
+        new_items = data.__class__()
+        for node in data:
+            if not node.hidden:
+                new_items.append(**node.get_attributes())
+        return new_items
 
     def __is_valid(self):
         self.is_valid_model_instance(self._model)
@@ -3698,12 +3718,18 @@ class JoinSelectResult(ResultPaginatorMixin, BaseResult, OrderByJoinResultMixin,
         result_data = merge(all_nodes_from_database, local_items)
         result_data = update_node_data(result_data)
         result_data = fix_local_fk_value(result_data)
-        result_data = self._sort_items(tuple(result_data), **self._create_params_to_sort_items())
-        return self._create_output(result_data)
+        result_data = self._sort_items(result_data, **self._create_params_to_sort_items())
+        return result_data
+
+    def _filter_items(self):
+        return tuple(nodes_group for nodes_group in self if not nodes_group.has_hidden_nodes)
 
     @staticmethod
-    def _create_output(data: Union[Iterable[ServiceOrmContainer], Iterator[ServiceOrmContainer]]) -> tuple[ResultORMCollection]:
+    def _create_output(data) -> tuple[ResultORMCollection]:
         return tuple(ResultORMCollection(item) for item in data)
+
+    def _sort_items(self, data, **kwargs):
+        return super()._sort_items(tuple(data), **kwargs)
 
     def __is_valid(self):
         if type(self.__on_items) is not dict:
