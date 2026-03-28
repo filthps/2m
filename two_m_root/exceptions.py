@@ -1,3 +1,8 @@
+"""
+Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
+"""
+
+
 class ModelsConfigurationError(Exception):
     def __init__(self, text=""):
         super().__init__(text or "Ошибка в models.py. Конфигурация чисто кастомная! \
