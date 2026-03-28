@@ -733,17 +733,18 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertTrue(any(map(lambda x: x.value.get("machinename", None), self.orm_manager.connection.items)))
         self.assertIs(self.orm_manager.connection.items[1].model, Machine)
         self.assertIs(self.orm_manager.connection.items[0].model, Cnc)
-        self.orm_manager.set_item(_model=OperationDelegation, _update=True, operationdescription="text")
+        self.orm_manager.set_item(_model=OperationDelegation, _insert=True, operationdescription="text")
         self.assertEqual(self.orm_manager.connection.items[2].value["operationdescription"], "text")
         self.orm_manager.set_item(_insert=True, _model=Condition, findfull=True, parentconditionbooleanvalue=True)
         self.assertEqual(self.orm_manager.connection.items.__len__(), 4)
-        self.orm_manager.set_item(_delete=True, machinename="Some_name", _model=Machine, inputcatalog=r"D:\Test",
+        self.orm_manager.set_item(_delete=True, machinename="Helller", _model=Machine, inputcatalog=r"D:\Test",
                                   outputcatalog=r"C:\anef")
-        self.orm_manager.set_item(_delete=True, machinename="Some_name_2", _model=Machine)
-        result = self.orm_manager.get_items(_model=Machine, machinename="Helller", _db_only=True)
+        result = self.orm_manager.get_items(_model=Machine, machinename="Helller")
+        self.assertFalse(result)
+        self.assertEqual(0, result.__len__())  # Ноды
         import time
         time.sleep(self.orm_manager.RELEASE_INTERVAL_SECONDS + 1)
-        self.assertTrue(result)
+        self.assertFalse(result)
         # start Invalid ...
         # плохой path
         self.assertRaises(NodeColumnError, self.orm_manager.set_item, _insert=True, _model=Machine, input_path="path")  # inputcatalog
@@ -761,14 +762,20 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.assertRaises(InvalidModel, self.orm_manager.set_item, machinename="Heller", _delete=True, _model=['some_str'])
         # invalid field
         # field name | такого поля нет в таблице
+        NodeDataManager.INCOMING_DATA_VALIDATION_LEVEL = "strong"
         self.assertRaises(NodeColumnError, self.orm_manager.set_item, invalid_="testval", _model=Machine, _insert=True)
         self.assertRaises(NodeColumnError, self.orm_manager.set_item, invalid_field="val", other_field=2,
                           other_field_5="name", _model=Cnc, _update=True)  # Поля нету в таблице
-        self.assertRaises(NodeColumnError, self.orm_manager.set_item, field="value", _model=OperationDelegation, _delete=True)  # Поля нету в таблице
-        self.assertRaises(NodeColumnError, self.orm_manager.set_item, inv="testl", _model=Machine, _insert=True)  # Поля нету в таблице
-        self.assertRaises(NodeColumnError, self.orm_manager.set_item, machinename=object(), _model=SearchString, _insert=True)
-        self.assertRaises(NodeColumnError, self.orm_manager.set_item, name="123", _model=SearchString, _insert=True)
+        self.assertRaises(NodePrimaryKeyError, self.orm_manager.set_item, field="value", _model=OperationDelegation, _delete=True)  # Поля нету в таблице
+        self.assertRaises(NodePrimaryKeyError, self.orm_manager.set_item, inv="testl", _model=Machine, _insert=True)  # Поля нету в таблице
+        self.assertRaises(NodePrimaryKeyError, self.orm_manager.set_item, machinename=object(), _model=SearchString, _insert=True)
+        self.assertRaises(NodePrimaryKeyError, self.orm_manager.set_item, name="123", _model=SearchString, _insert=True)
+        NodeDataManager.IGNORE_NODE_PRIMARY_KEY_ERROR = False
+        self.assertRaises(NodePrimaryKeyError, self.orm_manager.set_item, field="value", _model=OperationDelegation, _delete=True)  # Поля нету в таблице
+        self.assertRaises(NodeColumnError, self.orm_manager.set_item, inv="testl", _model=Machine, _insert=True)  # NodePrimaryKeyError - не возбудится,
+        # тк есть процедура по умолчанию для столбца PK, тем не менее, столбец inv отсутствует в данной таблице
         # field value | значение не подходит
+        NodeDataManager.IGNORE_NODE_PRIMARY_KEY_ERROR = True
         self.assertRaises(NodeColumnValueError, self.orm_manager.set_item, _model=Machine, _update=True, machinename=Machine())
         self.assertRaises(NodeColumnValueError, self.orm_manager.set_item, _model=Machine, _update=True, machinename=Cnc())
         self.assertRaises(NodeColumnValueError, self.orm_manager.set_item, _model=Machine, _update=True, machinename=int)
@@ -810,6 +817,8 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
         self.assertFalse(any(filter(lambda x: not len(x) == 2, result)))
         self.assertEqual(4, result.__len__())
+        u = result.items[0]["Cnc"]
+        print(u)
         self.assertEqual(result.items[0]["Cnc"]["cncid"], 1, result.items[0]["Machine"]["cncid"])
         self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
         self.assertEqual(result.items[0]["Machine"]["machinename"], "Tesm")
