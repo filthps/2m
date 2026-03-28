@@ -58,7 +58,7 @@
 
 <code>
 
-    from two_m_root import Tool
+    from two_m_root.core import Tool
     from two_m.models import SomeModel
     ...
     ...
@@ -163,6 +163,7 @@
 Объект запроса к 1 таблице.
 * *items* - property - ResultORMCollection
 * __iter__ - ResultORMCollection._ _iter_ _()
+* **visible_items** - property - ResultORMCollection. Только ноды с атрибутом 'ui_hidden': False в словаре value.
 * __bool__ - True, если есть хотя бы 1 результат, иначе False
 * __len__ - От количества ResultORMItem в ResultORMCollection
 * __getitem__ - Вернёт новый экземпляр **ResultORMCollection** с одним или несколькими *ResultORMItem* по:
@@ -184,13 +185,14 @@
 ### <center>JoinSelectResult</center>
 Объект запроса к нескольким таблицам.
 В рамках результирующего списка каждый ResultORMCollection представляет внутри себя связку **PK-FK**. 
-* *items* - property - list(ResultORMCollection)
-* __iter__ - list(ResultORMCollection)._ _ iter_ _()
+* *items* - property - tuple(ResultORMCollection)
+* __iter__ - tuple(ResultORMCollection)._ _ iter_ _()
+* **visible_items** - property - кортеж ResultORMCollection. Если в одной из нод, в рамках одной группы нод, имеют 'ui_hidden': True в словаре value, то данная группа будет скрыта из результатов.
 * __bool__ - True, если в списке есть хотя бы 1 результат ResultORMCollection, иначе False
-* __len__ - От количества ResultORMItem в ResultORMCollection
+* __len__ - От количества ResultORMCollection в кортеже результатов
 * __getitem__ - Вернёт новый экземпляр **ResultORMCollection** по одному из следующих способов:
 1. Индекс в результирующем кортеже - int
-2. Хеш-сумма hash(ResultORMCollection)
+2. Хеш-сумма hash(sum(map(...ResultORMCollection)))
 3. Хеш-сумма первичных ключей+значений внутри ResultORMCollection - int
 * __contains__ - Поддерживается возможность проверки содержания следующих типов:
 1. ResultORMCollection
@@ -262,7 +264,6 @@
 - - **add_model_name_prefix** - *Метод(callable)*. Установить всем столбцам значений, находящихся в каждом *ResultORMItem*, префикс с названием таблицы
 - - **remove_model_name_prefix** - *Метод(callable)*. Удалить префикс с названием таблицы из каждого значения каждого *ResultORMItem*
 - - **auto_model_name_prefix** - *Метод(callable)*. Если какой-либо столбец(его название) повторяется в каком-либо *ResultORMItem* текущего контейнера, то добавить префикс, иначе не добавлять
-- - **get_all_visible_items** - *свойство(property)*. Главное свойство, которое выдаёт результат, предназначенный для использования. Он же в *__iter__* и *__len__*.
 - - **all_nodes** - Итератор со всеми *ResultORMItem*. 
 Он возвращает все ноды, включая те, которые находятся в очереди и должны сделать delete в базе данных.
 > Призываю не использовать метод *all_nodes*, он нужен для служебного пользования :rage:
@@ -326,4 +327,31 @@ Postgresql в качестве базы данных
   *pymemcache.RetryingClient* вместо *pymemcache.Client* в свойстве Tool.cache.
 
   Отказ от идеи наследования класса *Tool* в пользовательский пакет *two_m*, модуль *main*.
-  Напротив, из *two_m.main* теперь импортируются константы в *two_m_root.orm*.
+  Напротив, из *two_m.main* теперь импортируются константы в *two_m_root.core*.
+- 
+
+## 1.2
+
+  **Result.order_by(...), JoinSelectResult.order_by(...)**
+
+- *Result* и *JoinSelectResult* получили метод **order_by** от миксина OrderByMixin
+  Сортировка возможна по длине строк, времени добавления, или в алфавитном порядке.
+  По любому столбцу в таблице или просто по первичному ключу.
+  
+  Пример использования:
+
+  1. Инициализируем объект *Result* или *JoinSelectResult* с интересующими нас параметрами.
+
+  <code>lazy_result = my_tool_instance.get_items(table_name, ...)</code>
+
+  2. Вызываем метод **order_by**, передавая один или несколько параметров.
+
+  <code>lazy_result.order_by(...)</code>
+  
+  3. Теперь, каждый раз, когда вы выполняете итерации по обновлямому результату, будет происходить сортировка.
+
+
+- ConnectionManager
+
+  Все соединения с внешними сервисами вынесены в отдельный класс. Открытые подключения закрываются по таймерам, 
+  не засоряя пул. Можно настроить срок жизни подключения.
