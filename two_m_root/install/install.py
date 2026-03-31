@@ -105,6 +105,8 @@ def check_requirements():
         for package_name in package_items:
             if not package_name:
                 continue
+            if "==" not in package_name:  # Тот случай, когда установка выполнялась через git+https...
+                continue  # Оставим проверку версии на совести владельца requirements
             n, v = package_name.split("==")
             if n in required_d:
                 if not is_valid_version(v, required_d[n]):
