@@ -9,7 +9,6 @@ from two_m_root.conf import CustomModel
 from two_m_root.tools import ModelTools
 from two_m_root.containers import ServiceOrmContainer, ResultORMCollection
 from two_m_root.nodes import QueueItem
-from two_m_root.result import Result, JoinSelectResult
 from two_m_root.sort import LetterSortSingleNodes, LetterSortNodesChain, NumberSortSingleNodes, NumberSortNodesChain
 from two_m.main import ITEMS_ON_PAGE, BY_PRIMARY_KEY, BY_COLUMN_NAME, BY_CREATE_TIME, BY_ALPHABET, BY_STRING_LENGTH, REVERSED
 
@@ -25,6 +24,19 @@ class OrderByMixin(AbstractResultMixin):
     REVERSED = REVERSED
 
     def __init__(self: Union["Result", "JoinSelectResult"], *args, **kwargs):
+        from two_m_root.result import BaseResult, Result, JoinSelectResult
+        if not hasattr(self, "_get_local_nodes"):
+            raise AttributeError
+        if not hasattr(self, "_get_nodes_from_database"):
+            raise AttributeError
+        if not callable(self.get_local_nodes):
+            raise TypeError
+        if not callable(self.get_nodes_from_database):
+            raise AttributeError
+        if not isinstance(self, (Result, JoinSelectResult,)):
+            raise TypeError
+        if not issubclass(self.__class__, BaseResult):
+            raise TypeError
         super().__init__(*args, **kwargs)
         self._is_sort = False
         if self.BY_STRING_LENGTH or self.BY_COLUMN_NAME or self.BY_CREATE_TIME:
@@ -160,6 +172,7 @@ class OrderByMixin(AbstractResultMixin):
 class OrderBySingleResultMixin(OrderByMixin):
     """ Реализация для 'одиночного результата',- запрос к одной таблице. См Tool.get_items() """
     def __init__(self, *a, **k):
+        from two_m_root.result import Result
         if not isinstance(self, Result):
             raise TypeError
         super().__init__(*a, **k)
@@ -203,6 +216,7 @@ class OrderBySingleResultMixin(OrderByMixin):
 class OrderByJoinResultMixin(OrderByMixin, ModelTools):
     """ Реализация для запросов с join. См Tool.join_select() """
     def __init__(self, *a, **k):
+        from two_m_root.result import Result, JoinSelectResult
         if not isinstance(self, JoinSelectResult):
             raise TypeError
         self._model = None

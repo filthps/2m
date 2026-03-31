@@ -2,16 +2,103 @@
 Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 """
 import hashlib
-from abc import ABC
+from abc import ABC, abstractmethod
 from weakref import ref
-from typing import Union, Optional
+from typing import Union, Optional, Iterable
 from two_m_root.abstractions import AbstractResult
-from two_m_root.core import ResultCacheTools
 from two_m_root.containers import ResultORMCollection, ServiceOrmContainer
 from two_m_root.nodes import ResultORMItem
 from two_m_root.tools import ModelTools
-from two_m_root.pointer import Pointer
+from two_m_root.core import Tool
 from two_m_root.mixins import SliceResultMixin, OrderBySingleResultMixin, OrderByJoinResultMixin, ResultPaginatorMixin
+
+
+class ResultCacheTools(Tool):
+    TEMP_HASH_PREFIX: str = ...
+    __iter__ = abstractmethod(lambda self: ...)
+
+    def __init__(self, id_: int, *args, **kw):
+        if not issubclass(type(self), BaseResult):
+            raise TypeError
+        if type(id_) is not int:
+            raise TypeError
+        self._id = str(id_)
+        if not self._id:
+            raise ValueError
+        self.__key = f"{self.TEMP_HASH_PREFIX}{self._id[-5:]}"
+
+    def _set_hash(self, nodes):
+        self.__is_valid_nodes(nodes)
+        hash_sum = set(map(str, map(hash, nodes)))
+        self.connection.cache.set(self.__key, hash_sum)
+        pk_hash_sum = set(map(str, map(lambda node: node.hash_by_pk, nodes)))
+        hash_sum_and_pk_hash_sum = hash_sum.union(pk_hash_sum)
+        self._add_to_all_nodes_hash_has_been_in_result(hash_sum_and_pk_hash_sum)
+
+    def _add_hash_item(self, value):
+        self.__is_valid_hash_key(value)
+        current_hash = self._get_hash()
+        current_hash.add(value)
+        self.connection.cache.set(self.__key, current_hash)
+
+    def _get_hash(self) -> set[str]:
+        return self.connection.cache.get(self.__key, set())
+
+    def _is_node_hash_has_been_in_result(self, value):
+        """ Была ли данная нода(её хеш-сумма) в результатах когда-либо ранее"""
+        self.__is_valid_hash_key(value)
+        return value in self.__get_all_nodes_has_been_in_result()
+
+    def _add_to_all_nodes_hash_has_been_in_result(self, items: Iterable[str]):
+        [self.__is_valid_hash_key(i) for i in items]
+        checked = self.__get_all_nodes_has_been_in_result()
+        checked.update(items)
+        self.connection.cache.set(f"{self.__key}-all", checked)
+
+    def _is_hash_from_checked(self, val):
+        return val in self.connection.cache.get(f"{self.__key}-checked", set())
+
+    def _add_hash_to_checked(self, values):
+        [self.__is_valid_hash_key(n) for n in values]
+        checked = self._get_checked_hash_items()
+        checked.update(values)
+        self.connection.cache.set(f"{self.__key}-checked", checked)
+
+    def _get_checked_hash_items(self):
+        return self.connection.cache.get(f"{self.__key}-checked", set())
+
+    def _remove_hash_from_checked(self, val):
+        checked = self._get_checked_hash_items()
+        if val not in checked:
+            return
+        checked.remove(val)
+        self.connection.cache.set(f"{self.__key}-checked", checked)
+
+    def _set_primary_keys(self, nodes):
+        self.__is_valid_nodes(nodes)
+        self.connection.cache.set(f"{self.__key}-pk", set(map(str, map(lambda x: x.hash_by_pk, nodes))))
+
+    def _get_primary_keys_hash(self) -> set[str]:
+        return self.connection.cache.get(f"{self.__key}-pk", set())
+
+    def __get_all_nodes_has_been_in_result(self) -> set:
+        return self.connection.cache.get(f"{self.__key}-all", set())
+
+    @staticmethod
+    def __is_valid_hash_key(hash_key):
+        if type(hash_key) is not str:
+            raise TypeError
+        if not hash_key:
+            raise ValueError
+
+    @staticmethod
+    def __is_valid_nodes(nodes: Union[Iterable[ResultORMCollection], ResultORMItem]):
+        if isinstance(nodes, (tuple, list, set, frozenset)):
+            if any(map(lambda x: type(x) is not ResultORMCollection, nodes)):
+                raise TypeError
+            return
+        if type(nodes) is not ResultORMCollection:
+            raise TypeError
 
 
 class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
@@ -120,6 +207,7 @@ class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
 
     @pointer.setter
     def pointer(self: Union["Result", "JoinSelectResult"], wrap_items: list):
+        from two_m_root.pointer import Pointer
         items = self.items
         self._set_hash(items)
         self._pointer = Pointer(self, wrap_items)

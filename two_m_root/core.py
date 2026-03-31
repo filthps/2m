@@ -3,7 +3,6 @@ Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 """
 import threading
 import warnings
-from abc import abstractmethod
 from typing import Union, Iterator, Iterable, Optional, Literal, Type
 from collections import ChainMap
 from pymemcache.client.base import PooledClient
@@ -14,10 +13,9 @@ from sqlalchemy.orm import sessionmaker as session_factory, scoped_session
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from two_m_root.conf import RESERVED_WORDS, CustomModel
 from two_m_root.dill.serde import DillSerde
-from two_m_root.containers import Queue, ServiceOrmContainer, ResultORMCollection
-from two_m_root.nodes import QueueItem, ServiceOrmItem, ResultORMItem
+from two_m_root.containers import Queue, ServiceOrmContainer
+from two_m_root.nodes import QueueItem, ServiceOrmItem
 from two_m_root.mixins import SliceResultMixin
-from two_m_root.result import BaseResult, Result, JoinSelectResult
 from two_m_root.tools import ModelTools
 from two_m_root.database.postgres.exceptions import DatabaseException
 from two_m_root.exceptions import NodePrimaryKeyError, NodeColumnError, NodeColumnValueError, NodeAttributeError, \
@@ -156,6 +154,7 @@ class Tool(ModelTools):
         2) Получаем данные из кеша, все элементы, у которых данная модель
         3) db_data.update(quque_data)
         """
+        from two_m_root.result import Result
         model = _model or cls._model_obj
         cls.is_valid_model_instance(model)
 
@@ -222,6 +221,8 @@ class Tool(ModelTools):
         :return: специальный итерируемый объект класса JoinSelectResult, который содержит смешанные данные из локального
         хранилища и БД
         """
+        from two_m_root.result import JoinSelectResult
+
         def is_valid():
             if sum((_db_only, _queue_only,)) not in [0, 1]:
                 raise ValueError
@@ -1150,91 +1151,3 @@ class NodeDataManager(ModelTools):
             raise ValueError
         node_data.update({"_delete": False, "_insert": False, "_update": False})
         node_data.update({"_delete": delete, "_update": update, "_insert": insert})
-
-
-class ResultCacheTools(Tool):
-    TEMP_HASH_PREFIX: str = ...
-    __iter__ = abstractmethod(lambda self: ...)
-
-    def __init__(self, id_: int, *args, **kw):
-        if not issubclass(type(self), BaseResult):
-            raise TypeError
-        if type(id_) is not int:
-            raise TypeError
-        self._id = str(id_)
-        if not self._id:
-            raise ValueError
-        self.__key = f"{self.TEMP_HASH_PREFIX}{self._id[-5:]}"
-
-    def _set_hash(self, nodes):
-        self.__is_valid_nodes(nodes)
-        hash_sum = set(map(str, map(hash, nodes)))
-        self.connection.cache.set(self.__key, hash_sum)
-        pk_hash_sum = set(map(str, map(lambda node: node.hash_by_pk, nodes)))
-        hash_sum_and_pk_hash_sum = hash_sum.union(pk_hash_sum)
-        self._add_to_all_nodes_hash_has_been_in_result(hash_sum_and_pk_hash_sum)
-
-    def _add_hash_item(self, value):
-        self.__is_valid_hash_key(value)
-        current_hash = self._get_hash()
-        current_hash.add(value)
-        self.connection.cache.set(self.__key, current_hash)
-
-    def _get_hash(self) -> set[str]:
-        return self.connection.cache.get(self.__key, set())
-
-    def _is_node_hash_has_been_in_result(self, value):
-        """ Была ли данная нода(её хеш-сумма) в результатах когда-либо ранее"""
-        self.__is_valid_hash_key(value)
-        return value in self.__get_all_nodes_has_been_in_result()
-
-    def _add_to_all_nodes_hash_has_been_in_result(self, items: Iterable[str]):
-        [self.__is_valid_hash_key(i) for i in items]
-        checked = self.__get_all_nodes_has_been_in_result()
-        checked.update(items)
-        self.connection.cache.set(f"{self.__key}-all", checked)
-
-    def _is_hash_from_checked(self, val):
-        return val in self.connection.cache.get(f"{self.__key}-checked", set())
-
-    def _add_hash_to_checked(self, values):
-        [self.__is_valid_hash_key(n) for n in values]
-        checked = self._get_checked_hash_items()
-        checked.update(values)
-        self.connection.cache.set(f"{self.__key}-checked", checked)
-
-    def _get_checked_hash_items(self):
-        return self.connection.cache.get(f"{self.__key}-checked", set())
-
-    def _remove_hash_from_checked(self, val):
-        checked = self._get_checked_hash_items()
-        if val not in checked:
-            return
-        checked.remove(val)
-        self.connection.cache.set(f"{self.__key}-checked", checked)
-
-    def _set_primary_keys(self, nodes):
-        self.__is_valid_nodes(nodes)
-        self.connection.cache.set(f"{self.__key}-pk", set(map(str, map(lambda x: x.hash_by_pk, nodes))))
-
-    def _get_primary_keys_hash(self) -> set[str]:
-        return self.connection.cache.get(f"{self.__key}-pk", set())
-
-    def __get_all_nodes_has_been_in_result(self) -> set:
-        return self.connection.cache.get(f"{self.__key}-all", set())
-
-    @staticmethod
-    def __is_valid_hash_key(hash_key):
-        if type(hash_key) is not str:
-            raise TypeError
-        if not hash_key:
-            raise ValueError
-
-    @staticmethod
-    def __is_valid_nodes(nodes: Union[Iterable[ResultORMCollection], ResultORMItem]):
-        if isinstance(nodes, (tuple, list, set, frozenset)):
-            if any(map(lambda x: type(x) is not ResultORMCollection, nodes)):
-                raise TypeError
-            return
-        if type(nodes) is not ResultORMCollection:
-            raise TypeError

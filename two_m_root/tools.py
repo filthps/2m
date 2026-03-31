@@ -5,8 +5,8 @@ import os
 import importlib
 from typing import Union, Iterator, Optional, Type, Any
 from two_m_root.conf import CustomModel
-from two_m_root.nodes import QueueItem, ServiceOrmItem
-from two_m_root.exceptions import *
+from two_m_root.exceptions import ModelsConfigurationError, InvalidModel, NodePrimaryKeyError, \
+    NodeColumnValueError, NodeColumnError, NodeDMLTypeError
 
 
 class ModelTools:
@@ -154,6 +154,7 @@ class NodeTools:
     @staticmethod
     def _field_names_validation(node, values: dict):
         """ Соотнести все столбцы ноды в словаре value со столбцами из класса Model """
+        from two_m_root.nodes import QueueItem, ServiceOrmItem
         if type(values) is not dict:
             raise TypeError
         if not isinstance(node, (ServiceOrmItem, QueueItem,)):

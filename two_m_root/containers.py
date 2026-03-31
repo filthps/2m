@@ -4,10 +4,10 @@ import hashlib
 import weakref
 from itertools import zip_longest
 from typing import Union, Iterator, Iterable, Optional, Literal, Type, Any
+from two_m_root.tools import ModelTools
 from two_m_root.conf import CustomModel
 from two_m.main import ADD_TABLE_NAME_PREFIX
 from two_m_root.nodes import LinkedListItem, QueueItem, ServiceOrmItem, ResultORMItem
-from two_m_root.tools import ModelTools
 from two_m_root.exceptions import NodePrimaryKeyError, NodeColumnValueError, DoesNotExists
 
 

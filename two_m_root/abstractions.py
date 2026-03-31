@@ -1,7 +1,30 @@
 """
 Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 """
+from typing import Union, Iterator
 from abc import ABC, abstractmethod
+from two_m_root.tools import ModelTools
+
+
+class AbstractResultMixin:
+    @abstractmethod
+    def get_local_nodes(self, *args, **kwargs) -> Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"]:
+        """ Перегружаем этот метод в миксине, производя манипуляции с данными или передавая дополнительные аргументы """
+        ...
+
+    @abstractmethod
+    def get_nodes_from_database(self, *args, **kwargs) -> Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"]:
+        """ Перегружаем этот метод в миксине, производя манипуляции с данными или передавая дополнительные аргументы """
+        ...
+
+    @property
+    @abstractmethod
+    def items(self):
+        ...
+
+    @abstractmethod
+    def __iter__(self):
+        ...
 
 
 class AbstractNode(ABC):
@@ -76,64 +99,32 @@ class AbsSort(ABC):
             raise AttributeError(f"У таблицы {model.__name__} отсутствует столбец {column_name}.")
 
 
-class AbstractResultMixin:
-    def __init__(self, *a, **kw):
-        if not hasattr(self, "_get_local_nodes"):
-            raise AttributeError
-        if not hasattr(self, "_get_nodes_from_database"):
-            raise AttributeError
-        if not callable(self.get_local_nodes):
-            raise TypeError
-        if not callable(self.get_nodes_from_database):
-            raise AttributeError
-        if not isinstance(self, (Result, JoinSelectResult,)):
-            raise TypeError
-        if not issubclass(self.__class__, BaseResult):
-            raise TypeError
-        super().__init__(*a, **kw)
-
-    def get_local_nodes(self, *args, **kwargs) -> Union[tuple[ServiceOrmContainer], ServiceOrmContainer]:
-        """ Перегружаем этот метод в миксине, производя манипуляции с данными или передавая дополнительные аргументы """
-        ...
-
-    def get_nodes_from_database(self, *args, **kwargs) -> Union[tuple[ServiceOrmContainer], ServiceOrmContainer]:
-        """ Перегружаем этот метод в миксине, производя манипуляции с данными или передавая дополнительные аргументы """
-        ...
-
-    @property
-    def items(self):
-        ...
-
-    def __iter__(self):
-        ...
-
-
 class AbstractResult:
     @abstractmethod
-    def get_nodes_from_database(self, *args, **kwargs) -> Union[ServiceOrmContainer, tuple[ServiceOrmContainer]]:
+    def get_nodes_from_database(self, *args, **kwargs) -> Union["ServiceOrmContainer", tuple["ServiceOrmContainer"]]:
         if hasattr(self, "get_nodes_from_database"):
             return super().get_nodes_from_database(*args, **kwargs)
 
     @abstractmethod
-    def get_local_nodes(self, *args, **kwargs) -> Union[ServiceOrmContainer, tuple[ServiceOrmContainer]]:
+    def get_local_nodes(self, *args, **kwargs) -> Union["ServiceOrmContainer", tuple["ServiceOrmContainer"]]:
         """ Геттер данных из локальной очереди нод. """
         if hasattr(self, "get_local_nodes"):
             return super().get_local_nodes(*args, **kwargs)
 
     @abstractmethod
-    def items(self) -> Union[tuple[ResultORMCollection], ResultORMCollection]:
+    def items(self) -> Union[tuple["ResultORMCollection"], "ResultORMCollection"]:
         """ Возможность производить итерации по содержимому. см __iter__ """
         ...
         return self._create_output(...)
 
     @abstractmethod
-    def __iter__(self) -> Iterator[Union[tuple[ResultORMCollection], ResultORMCollection]]:
+    def __iter__(self) -> Iterator[Union[tuple["ResultORMCollection"], "ResultORMCollection"]]:
         """ Возможность производить итерации по содержимому. """
         ...
         return self._create_output(...)
 
     @abstractmethod
-    def _merge(self, *args, **kwargs) -> Union[tuple[ServiceResultOrmContainer], ServiceResultOrmContainer]:
+    def _merge(self, *args, **kwargs) -> Union[tuple["ServiceResultOrmContainer"], "ServiceResultOrmContainer"]:
         """ Функция, которая делает репликацию нод из кеша поверх нод из бд """
         ...
         return self._create_output(...)
@@ -145,14 +136,14 @@ class AbstractResult:
 
     @staticmethod
     @abstractmethod
-    def _create_output(self, data) -> Union[tuple[ResultORMCollection], ResultORMCollection]:
+    def _create_output(self, data) -> Union[tuple["ResultORMCollection"], "ResultORMCollection"]:
         """ Сформировать результирующую последовательность соответственного типа,
         доступную для использования конечным пользователем """
         ...
         return ...
 
     @abstractmethod
-    def _filter_items(self, data) -> Union[tuple[ServiceResultOrmContainer], ServiceResultOrmContainer]:
+    def _filter_items(self, data) -> Union[tuple["ServiceResultOrmContainer"], "ServiceResultOrmContainer"]:
         """ Отфильтровать ноды или коллекции нод, если в них присутствуют скрытые ноды.
         Обычно удобно скрывать ноды с dml _delete - True/ """
         ...

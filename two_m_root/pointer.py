@@ -7,9 +7,9 @@ from itertools import zip_longest
 from abc import abstractmethod
 from typing import Union, Iterator, Iterable, Optional
 from two_m_root.core import Tool
+from two_m_root.result import JoinSelectResult, Result
 from two_m_root.containers import ResultORMCollection
 from two_m_root.nodes import ResultORMItem
-from two_m_root.result import JoinSelectResult, Result
 from two_m_root.exceptions import PointerWrapperLengthError, PointerWrapperTypeError, PointerRepeatedWrapper, \
     JoinedItemPointerError
 from two_m.main import WRAP_ITEM_MAX_LENGTH
