@@ -311,8 +311,8 @@ class Result(ResultPaginatorMixin, BaseResult, OrderBySingleResultMixin, ModelTo
         в специальный защищённый контейнер """
         return ResultORMCollection(data)
 
-    def _filter_items(self):
-        data = self.items
+    @staticmethod
+    def _filter_items(data):
         new_items = data.__class__()
         for node in data:
             if not node.hidden:
@@ -519,8 +519,9 @@ class JoinSelectResult(ResultPaginatorMixin, BaseResult, OrderByJoinResultMixin,
         result_data = self._sort_items(result_data, **self._create_params_to_sort_items())
         return result_data
 
-    def _filter_items(self):
-        return tuple(nodes_group for nodes_group in self if not nodes_group.has_hidden_nodes)
+    @staticmethod
+    def _filter_items(data):
+        return tuple(nodes_group for nodes_group in data if not nodes_group.has_hidden_nodes)
 
     @staticmethod
     def _create_output(data) -> tuple[ResultORMCollection]:

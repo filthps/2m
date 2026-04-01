@@ -143,6 +143,7 @@ class AbstractResult:
         return ...
 
     @abstractmethod
+    @abstractmethod
     def _filter_items(self, data) -> Union[tuple["ServiceResultOrmContainer"], "ServiceResultOrmContainer"]:
         """ Отфильтровать ноды или коллекции нод, если в них присутствуют скрытые ноды.
         Обычно удобно скрывать ноды с dml _delete - True/ """
