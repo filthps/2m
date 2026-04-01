@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), "settings.env"))
 DATABASE_PATH = os.environ.get("DATABASE_PATH")
 MEMCACHE_PATH = os.environ.get("CACHE_PATH")
+BASE_DIR_ROOT = os.path.dirname(__file__)
 # Далее константы классов
 # Tool
 RELEASE_INTERVAL_SECONDS: float = 20.0

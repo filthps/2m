@@ -1,12 +1,12 @@
 """
 Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 """
-import os
 import importlib
 from typing import Union, Iterator, Optional, Type, Any
 from two_m_root.conf import CustomModel
 from two_m_root.exceptions import ModelsConfigurationError, InvalidModel, NodePrimaryKeyError, \
     NodeColumnValueError, NodeColumnError, NodeDMLTypeError
+from two_m.main import BASE_DIR_ROOT
 
 
 class ModelTools:
@@ -102,7 +102,7 @@ class ModelTools:
         if not name:
             raise ValueError
         model_instance = getattr(importlib.import_module("models",
-                                 package=os.path.dirname(__file__)), name, None)
+                                 package=BASE_DIR_ROOT), name, None)
         if model_instance is None:
             raise InvalidModel(f"Класс-модель '{name}' в модуле models не найден")
         return model_instance
