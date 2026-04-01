@@ -9,23 +9,23 @@ from sqlalchemy.orm import Session, create_session
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "settings.env"))
 DB_PATH = os.environ.get("DATABASE_PATH")
+engine = create_engine(DB_PATH)
+session = create_session(bind=engine)
 
 
-def init_procedure(s: Session):
+def init_procedure():
     procedure_name = DDL("""
     
     """)
-    s.execute(procedure_name)
-    s.commit()
+    session.execute(procedure_name)
+    session.commit()
 
 
-def init_procedures(s):
-    init_procedure(s)
+def init_procedures():
+    init_procedure()
     ...
     ...
 
 
 if __name__ == "__main__":
-    engine = create_engine(DB_PATH)
-    session = create_session(bind=engine)
-    init_procedures(session)
+    init_procedures()
