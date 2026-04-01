@@ -129,7 +129,7 @@ def check_requirements():
 def copy_items():
     target_path = f"{os.getcwd()}{os.path.sep}{PACKAGE_NAME}"
     shutil.copytree(TEMPLATES_URL, f"{target_path}{os.path.sep}",
-                    ignore=shutil.ignore_patterns('*.pyc', 'tmp*'))
+                    ignore=shutil.ignore_patterns('*.pyc', 'tmp*'), dirs_exist_ok=True)
 
 
 if __name__ == '__main__':
