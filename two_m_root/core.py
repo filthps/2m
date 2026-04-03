@@ -718,8 +718,7 @@ class Tool(ModelTools):
     def __add_single_db_result_to_queue(items_db: Iterable[dict], model: CustomModel):
         """ Упаковать один или несколько результатов select к одной таблице в соответствующий контейнер. """
         result = ServiceOrmContainer()
-        [result.append(**{key: item.__dict__[key] for key in getattr(item.__class__, "column_names")}, _model=model)
-         for item in items_db]
+        [result.append(**{key: item.__dict__[key] for key in getattr(item.__class__, "column_names")}, _model=model, _insert=True) for item in items_db]
         return result
 
 

@@ -216,7 +216,7 @@ class OrderBySingleResultMixin(OrderByMixin):
 class OrderByJoinResultMixin(OrderByMixin, ModelTools):
     """ Реализация для запросов с join. См Tool.join_select() """
     def __init__(self, *a, **k):
-        from two_m_root.result import Result, JoinSelectResult
+        from two_m_root.result import JoinSelectResult
         if not isinstance(self, JoinSelectResult):
             raise TypeError
         self._model = None

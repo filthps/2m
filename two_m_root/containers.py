@@ -1,4 +1,6 @@
-""" Copyright (C) 2025 Литовченко Виктор Иванович (filthps) """
+"""
+Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
+"""
 import copy
 import hashlib
 import weakref
@@ -767,7 +769,7 @@ class Queue(LinkedList):
                     break
 
 
-class Queue(SuperQueue, Queue):  # todo проверить все тесты без наследования от SuperQueue
+class Queue(SuperQueue, Queue):
     LinkedListItem = QueueItem
 
 
@@ -821,7 +823,7 @@ class ResultORMCollection:
     ADD_TABLE_NAME_PREFIX: Literal["auto", "add", "no-prefix"] = ADD_TABLE_NAME_PREFIX
     CONTAINER = ServiceResultOrmContainer  # Тип, хранимый внутри, имутабелен
 
-    def __init__(self, collection: "ServiceOrmContainer", prefix_mode=None):
+    def __init__(self, collection: "ServiceOrmContainer", prefix_mode=None, show_hidden_nodes=None):
         def is_valid(items):
             if type(items) is not ServiceOrmContainer:
                 raise TypeError
@@ -833,9 +835,13 @@ class ResultORMCollection:
                 return
             if type(items[0]) is not ServiceOrmItem:
                 raise TypeError
+            if not isinstance(self._show_hidden, (bool, type(None))):
+                raise TypeError
         self._prefix_mode = prefix_mode if prefix_mode is not None else self.ADD_TABLE_NAME_PREFIX
+        self._show_hidden = show_hidden_nodes
         is_valid(collection)
         self.__collection = self.__convert_node_data(collection)
+        self.__collection = self.__filter_nodes(self.__collection)
         self.remove_model_prefix()
         if self._prefix_mode == "add":
             self.add_model_name_prefix()
@@ -854,7 +860,11 @@ class ResultORMCollection:
 
     @property
     def container_cls(self):
-        return type(self.__collection)
+        return self.__collection.__class__
+
+    @property
+    def has_hidden_nodes(self):
+        return self.__collection.has_hidden_nodes
 
     def add_model_name_prefix(self):
         """ Изменит всю коллекцию, добавив префиксы названия таблицы к каждому значению полей у каждой ноды """
@@ -867,7 +877,6 @@ class ResultORMCollection:
             except StopIteration:
                 break
             else:
-
                 node.add_model_name_prefix()
                 new_collection.append(**node.get_attributes())
         self.__collection = new_collection
@@ -959,3 +968,19 @@ class ResultORMCollection:
                                **node.value)
          for node in collection]
         return new_collection
+
+    def __filter_nodes(self, collection: ServiceResultOrmContainer) -> ServiceResultOrmContainer:
+        if type(collection) is not self.CONTAINER:
+            raise TypeError
+        if self._show_hidden is None:
+            return collection
+        new_items = self.CONTAINER()
+        if not self._show_hidden:
+            [new_items.append(**node.get_attributes())
+             for node in self
+             if not node.hidden]
+        if self._show_hidden:
+            [new_items.append(**node.get_attributes())
+             for node in self
+             if node.hidden]
+        return new_items
