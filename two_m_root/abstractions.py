@@ -1,7 +1,7 @@
 """
 Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 """
-from typing import Union, Iterator
+from typing import Union, Iterator, Optional
 from abc import ABC, abstractmethod
 from two_m_root.tools import ModelTools
 
@@ -124,7 +124,7 @@ class AbstractResult:
         return self._create_output(...)
 
     @abstractmethod
-    def _merge(self, *args, **kwargs) -> Union[tuple["ServiceResultOrmContainer"], "ServiceResultOrmContainer"]:
+    def _merge(self, *args, **kwargs) -> Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"]:
         """ Функция, которая делает репликацию нод из кеша поверх нод из бд """
         ...
         return self._create_output(...)
@@ -136,17 +136,10 @@ class AbstractResult:
 
     @staticmethod
     @abstractmethod
-    def _create_output(self, data) -> Union[tuple["ResultORMCollection"], "ResultORMCollection"]:
+    def _create_output(self, data: Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"], show_hidden_items: Optional[bool] = None) -> Union[tuple["ResultORMCollection"], "ResultORMCollection"]:
         """ Сформировать результирующую последовательность соответственного типа,
-        доступную для использования конечным пользователем """
+        доступную для использования конечным пользователем.
+        Отфильтровать ноды или коллекции нод, если в них присутствуют скрытые ноды.
+        Обычно удобно скрывать ноды с dml _delete - True. """
         ...
         return ...
-
-    @abstractmethod
-    @abstractmethod
-    def _filter_items(self, data) -> Union[tuple["ServiceResultOrmContainer"], "ServiceResultOrmContainer"]:
-        """ Отфильтровать ноды или коллекции нод, если в них присутствуют скрытые ноды.
-        Обычно удобно скрывать ноды с dml _delete - True/ """
-        ...
-
-

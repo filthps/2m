@@ -103,6 +103,7 @@ class ResultCacheTools(Tool):
 
 class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
     TEMP_HASH_PREFIX: str = ...
+    ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT = True  # Скрывать или не скрывать скрытые ноды из итерируемой последовательности
 
     def __init__(self, get_nodes_from_database=None, get_local_nodes=None,
                  only_local=False, only_database=False, **kwargs):
@@ -190,16 +191,23 @@ class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
     def items(self):
         merged_data = self._merge()
         merged_data = self._sort_items(merged_data)
-        self.__merged_data = self._create_output(merged_data)
+        self.__merged_data = self._create_output(merged_data,
+                                                 show_hidden_items=False if self.ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT else None)
         return self.__merged_data
 
     @property
     def visible_items(self):
         merged_data = self._merge()
         sorted_data = self._sort_items(merged_data)
-        filtered_data = self._filter_items(sorted_data)
-        self.__merged_data = self._create_output(sorted_data)
-        return self._create_output(filtered_data)
+        self.__merged_data = self._create_output(sorted_data, show_hidden_items=False)
+        return self.__merged_data
+
+    @property
+    def hidden_items(self):
+        merged_data = self._merge()
+        sorted_data = self._sort_items(merged_data)
+        self.__merged_data = self._create_output(sorted_data, show_hidden_items=True)
+        return self.__merged_data
 
     @property
     def pointer(self):
@@ -215,7 +223,8 @@ class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
     def __iter__(self):
         merged_data = self._merge()
         merged_data = self._sort_items(merged_data)
-        self.__merged_data = self._create_output(merged_data)
+        self.__merged_data = self._create_output(merged_data,
+                                                 show_hidden_items=False if self.ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT else None)
         return self.__merged_data.__iter__()
 
     def __len__(self):
@@ -305,19 +314,11 @@ class Result(ResultPaginatorMixin, BaseResult, OrderBySingleResultMixin, ModelTo
         return output
 
     @staticmethod
-    def _create_output(data):
+    def _create_output(data, show_hidden_items=None):
         """ Упаковать результат,
         готовый для использования конечным пользователем,
         в специальный защищённый контейнер """
-        return ResultORMCollection(data)
-
-    @staticmethod
-    def _filter_items(data):
-        new_items = data.__class__()
-        for node in data:
-            if not node.hidden:
-                new_items.append(**node.get_attributes())
-        return new_items
+        return ResultORMCollection(data, show_hidden_nodes=show_hidden_items)
 
     def __is_valid(self):
         self.is_valid_model_instance(self._model)
@@ -376,7 +377,7 @@ class JoinSelectResult(ResultPaginatorMixin, BaseResult, OrderByJoinResultMixin,
             return hash(item) in map(hash, self)
         return False
 
-    def _merge(self) -> tuple[ResultORMCollection]:
+    def _merge(self) -> tuple[ServiceOrmContainer]:
         def check_input_items(items: list[ServiceOrmContainer]):
             """ Тестировать входящие результаты на соответствие. """
             if not isinstance(items, list):
@@ -520,12 +521,15 @@ class JoinSelectResult(ResultPaginatorMixin, BaseResult, OrderByJoinResultMixin,
         return result_data
 
     @staticmethod
-    def _filter_items(data):
-        return tuple(nodes_group for nodes_group in data if not nodes_group.has_hidden_nodes)
-
-    @staticmethod
-    def _create_output(data) -> tuple[ResultORMCollection]:
-        return tuple(ResultORMCollection(item) for item in data)
+    def _create_output(data, show_hidden_items=None) -> tuple[ResultORMCollection]:
+        if show_hidden_items is None:
+            return tuple(ResultORMCollection(item) for item in data)
+        result = []
+        for item in data:
+            nodes = ResultORMCollection(item, show_hidden_nodes=show_hidden_items)
+            if nodes:
+                result.append(nodes)
+        return tuple(result)
 
     def _sort_items(self, data, **kwargs):
         return super()._sort_items(tuple(data), **kwargs)
