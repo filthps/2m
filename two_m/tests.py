@@ -1421,7 +1421,6 @@ class TestSliceMixin(unittest.TestCase, SetUp):
         result_obj.order_by(by_primary_key=True, decr=False)
 
 
-
 class LetterSort(unittest.TestCase):
     def test_init(self):
         sort.LetterSortSingleNodes(Machine, "machinename", containers.ServiceOrmContainer())
@@ -1871,6 +1870,44 @@ class TestSortJoinResultMixin(unittest.TestCase, SetUp):
     # todo
 
 
+class TestResultSlice(unittest.TestCase, SetUp):
+    def setUp(self) -> None:
+        drop_db()
+        create_db()
+        init_all_triggers(DATABASE_PATH)
+        core.Tool.CACHE_LIFETIME_HOURS = 60
+        self.orm_manager = core.Tool()
+        self.orm_manager.connection.drop_cache()
+        self.set_data_into_database()
+        self.set_data_into_queue()
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_1", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_2", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_3", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_4", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_5", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_6", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_7", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_8", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_9", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_10", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_11", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_12", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_13", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_14", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_15", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_16", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_17", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_18", _insert=True)
+
+    def test_slice_single_result(self):
+        items = self.orm_manager.get_items(_model=Machine)
+        items.order_by(by_primary_key=True)
+        print([node["machineid"] for node in items])
+        items[3:7]
+        print([node["machineid"] for node in items])
+
+
 class TestResultPaginator(unittest.TestCase, SetUp):
     def setUp(self) -> None:
         drop_db()
@@ -1881,12 +1918,41 @@ class TestResultPaginator(unittest.TestCase, SetUp):
         self.orm_manager.connection.drop_cache()
         self.set_data_into_database()
         self.set_data_into_queue()
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_1", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_2", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_3", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_4", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_5", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_6", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_7", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_8", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_9", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_10", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_11", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_12", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_13", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_14", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_15", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_16", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_17", _insert=True)
+        self.orm_manager.set_item(_model=Machine, machinename="new_machine_18", _insert=True)
 
     def test_single_result_items(self):
         result_obj = self.orm_manager.get_items(Machine)
-        result_obj.RESIDUAL_ITEM = "db"
+        result_obj.order_by(by_primary_key=True)
+        result_obj.ROUNDING_POLICY = "-"
+        result_obj.RESIDUAL_ITEM = "none"
+        self.assertEqual(result_obj.ITEMS_ON_PAGE, float("inf"))  # Пагинатор выключен
+        self.assertEqual(25, len(result_obj))  # Пагинатор выключен
         result_obj.paginate(items_on_page=5)
+        self.assertEqual(result_obj.page, 1)
         self.assertEqual(result_obj.__len__(), 5)
+        print(result_obj)
+        result_obj.next_page
+        print(result_obj)
+        result_obj.next_page
+        print(result_obj)
 
     def test_join_result_items(self):
         pass
