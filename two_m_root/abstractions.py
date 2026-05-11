@@ -1,12 +1,21 @@
 """
 Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 """
-from typing import Union, Iterator, Optional
+from typing import Union, Iterator, Optional, Literal
 from abc import ABC, abstractmethod
 from two_m_root.tools import ModelTools
 
 
 class AbstractResultMixin:
+    def __init__(self, *r, only_local=None, only_database=None, get_nodes_from_database=None,
+                 get_local_nodes=None, **w):
+        self._only_local = only_local
+        self._only_db = only_database
+        self._get_nodes_from_database: Optional[callable] = get_nodes_from_database
+        self._get_local_nodes: Optional[callable] = get_local_nodes
+        super().__init__(*r, only_local=only_local, only_database=only_database,
+                         get_nodes_from_database=get_nodes_from_database, get_local_nodes=get_local_nodes, **w)
+
     @abstractmethod
     def get_local_nodes(self, *args, **kwargs) -> Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"]:
         """ Перегружаем этот метод в миксине, производя манипуляции с данными или передавая дополнительные аргументы """
@@ -136,10 +145,28 @@ class AbstractResult:
 
     @staticmethod
     @abstractmethod
-    def _create_output(self, data: Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"], show_hidden_items: Optional[bool] = None) -> Union[tuple["ResultORMCollection"], "ResultORMCollection"]:
+    def _create_output(data: Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"], show_hidden_items: Optional[bool] = None) -> Union[tuple["ResultORMCollection"], "ResultORMCollection"]:
         """ Сформировать результирующую последовательность соответственного типа,
         доступную для использования конечным пользователем.
         Отфильтровать ноды или коллекции нод, если в них присутствуют скрытые ноды.
         Обычно удобно скрывать ноды с dml _delete - True. """
         ...
         return ...
+
+
+class AbstractSliceMixin:
+    @abstractmethod
+    def reset_slice(self):
+        """ 'Сброс' сортировки, снятие играничений длины контейнера """
+        ...
+
+    @abstractmethod
+    def _get_slice_index(self, current_type: Literal["db", "local"]) -> tuple[int, Union[int, float]]:
+        """ Вычислить левый и правый индексы среза, передать именованными параметрами в функции get_nodes_from_database и
+         get_local_nodes """
+        ...
+
+    @abstractmethod
+    def __getitem__(self, item: slice):
+        """ Активация среза с его последующей мемоизацией в атрибуты экземпляра класса _left_border и _right_border """
+        ...
