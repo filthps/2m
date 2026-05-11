@@ -4,7 +4,8 @@ Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 import math
 from abc import abstractmethod
 from typing import Union, Optional, Literal
-from two_m_root.abstractions import AbstractResultMixin
+from itertools import cycle
+from two_m_root.abstractions import AbstractResultMixin, AbstractSliceMixin
 from two_m_root.conf import CustomModel
 from two_m_root.tools import ModelTools
 from two_m_root.containers import ServiceOrmContainer, ResultORMCollection
@@ -175,10 +176,10 @@ class OrderBySingleResultMixin(OrderByMixin):
         from two_m_root.result import Result
         if not isinstance(self, Result):
             raise TypeError
-        super().__init__(*a, **k)
         if not hasattr(self, "_model"):
             raise AttributeError
         ModelTools.is_valid_model_instance(self._model)
+        super().__init__(*a, **k)
 
     def order_by(self, by_column_name: Optional[str] = None, by_primary_key: Optional[bool] = None,
                  by_create_time: Optional[bool] = None, length: bool = False, alphabet: bool = False,
@@ -271,11 +272,263 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
                 raise TypeError
 
 
-class ResultPaginatorMixin(AbstractResultMixin):
+class BaseSliceResultMixin:
+    """ Функционал для контроля численности выборки в виде реализации среза. Мемоизация параметров среза."""
+    UNIFORM_SAMPLING_DB_AND_CACHE = False  # Производить выборку данных из кеша и базы данных равномерно - половина на половину
+    # Или сначала в результат пойдёт одна из категорий до исчерпания, а потом вторая
+    # Внимание. Если данный режим включён, то минимальное количество элементов в срезе может сильно разниться,
+    # и не будет соответствовать ожидаемой длине!
+
+    def __init__(self, *a, **kwargs):
+        super().__init__(*a, **kwargs)
+        self._is_slice = False
+        self._left_border = 0
+        self._right_border = float("inf")
+        self._call_counter = cycle((1, 2,))
+        self._current_call_counter = None
+
+    def reset_slice(self):
+        self._is_slice = False
+        self._left_border, self._right_border = 0, float("inf")
+
+    @classmethod
+    def change_slice_value_on_items_length(cls, items, left, right):
+        """ Ограничить срез длиной срезаемых результатов """
+        if not hasattr(items, "__iter__"):
+            raise TypeError("Не является итерируемым объектом")
+        cls._is_valid_slice_params(left, right)
+        items_length = len(items)
+        return left, right if items_length > right else items_length
+
+    def __getitem__(self, item: slice):
+        """ Срез начинается с 1, правая граница не входит, шаг всегда 1 """
+        if type(item) is not slice:
+            raise TypeError
+        start = item.start if item.start is not None else 1
+        stop = item.stop if item.stop is not None else float("inf")
+        if item.start == 0:
+            raise ValueError("Срез начинается с 1")
+        self._is_valid_slice(start - 1, stop - 1, item.step)
+        self._left_border = start - 1
+        self._right_border = stop - 1
+        self._is_slice = True
+
+    def _is_valid_slice(self, start, stop, step):
+        """ Левая часть среза начинается с 1, правая часть не входит """
+        if step is not None:
+            if not step == 1:
+                raise ValueError("Выборка с шагом не поддерживается, шаг всегда 1")
+        start = start if start is not None else 0
+        end = stop if stop is not None else float("inf")
+        self._is_valid_slice_params(start, end)
+
+    @staticmethod
+    def _is_valid_slice_params(start, end):
+        if type(start) is not int:
+            raise TypeError
+        if not isinstance(end, (int, float)):
+            raise TypeError
+        if type(end) is float:
+            if not end == float("inf"):
+                raise ValueError
+        if start < 0:
+            raise ValueError
+        if end < 0:
+            raise ValueError
+        if start > end:
+            raise ValueError
+
+    @staticmethod
+    def _is_valid_result_items(items: Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"]):
+        if not isinstance(items, (ResultORMCollection, tuple,)):
+            raise TypeError
+        if type(items) is tuple:
+            if not items:
+                return
+            if type(items[0]) is not ResultORMCollection:
+                raise TypeError
+
+
+class SliceResultMultiTypeDataMixin(BaseSliceResultMixin, AbstractSliceMixin, AbstractResultMixin):
+    """ Равномерный срез элементов из разных источников (бд и локальные).
+    Например, длина элементов в серезе - 10, тогда в результате будет 5 из локальных элементов и 5 из базы данных. """
+    ROUNDING_POLICY: Literal["+", "-"] = "+"  # Округление количества элементов в + или в -
+    RESIDUAL_ITEM: Literal["db", "local", "none"] = "db"  # Пример: в результате есть 4 элема БД и 3 из локалки,
+    # - кому будет отдано предпочтение оказаться лишним - четвёртым,
+    # если общее кол-во элемов в срезе 6, а частное от деления на 2 - 3.
+    # или отдавать предпочтение сначала одному из типов до исчерпания, а затем давать из второго типа
+    
+    def get_nodes_from_database(self, **kwargs):
+        if not self.UNIFORM_SAMPLING_DB_AND_CACHE:
+            if hasattr(super(), "get_nodes_from_database"):
+                return super().get_nodes_from_database(**kwargs)
+            return self._get_nodes_from_database(**kwargs)
+        self._current_call_counter = self._call_counter.__next__()
+        left, right = self._get_slice_index(current_type="db")
+        if hasattr(super(), "get_nodes_from_database"):
+            items = super().get_nodes_from_database(left_border=left, right_border=right, **kwargs)
+            if items is not None:  # if abstract
+                return items
+        return self._get_nodes_from_database(left_border=left, right_border=right, **kwargs)
+
+    def get_local_nodes(self, **kwargs):
+        if not self.UNIFORM_SAMPLING_DB_AND_CACHE:
+            if hasattr(super(), "get_local_nodes"):
+                return super().get_local_nodes(**kwargs)
+            return self._get_local_nodes(**kwargs)
+        self._current_call_counter = next(self._call_counter)
+        left, right = self._get_slice_index(current_type="local")
+        if hasattr(super(), "get_local_nodes"):
+            items = super().get_local_nodes(left_border=left, right_border=right, **kwargs)
+            if items is not None:  # if abstract
+                return items
+        return self._get_local_nodes(left_border=left, right_border=right, **kwargs)
+
+    def _get_slice_index(self, current_type):
+        if current_type not in ("db", "local",):
+            raise ValueError
+        if not self._is_slice:
+            return self._left_border, self._right_border
+        if self._only_db or self._only_local:
+            return self._left_border, self._right_border
+        if not self._right_border - self._left_border:
+            return 0, 0
+        length = (self._right_border - self._left_border) / 2
+        is_float = (self._right_border - self._left_border) % 2 if not self.RESIDUAL_ITEM == "none" else False
+        if not length == float("inf"):
+            length = math.floor(length) if self.ROUNDING_POLICY == "+" else math.ceil(length)
+        if not length:
+            length = 1
+        if length == 1:
+            left, right = self._left_border, self._right_border
+            if self.RESIDUAL_ITEM == current_type:
+                left, right = left, right + 1
+            if self._current_call_counter == 1:
+                left, right = left, right - 1
+            if self._current_call_counter == 2:
+                left, right = left + 1, right
+            if self.RESIDUAL_ITEM == "none" or not is_float:
+                return left, right
+        if length == float("inf"):
+            return self._left_border, float("inf")
+        left, right = 0, 0
+        if self._current_call_counter == 1:
+            left, right = self._left_border, self._right_border - length
+        elif self._current_call_counter == 2:
+            left, right = length + self._left_border, self._right_border
+        if not is_float:
+            return left, right
+        if self.RESIDUAL_ITEM == "none":
+            return left, right
+        if self.RESIDUAL_ITEM == "db" and current_type == "db":
+            return left, right + 1
+        if self.RESIDUAL_ITEM == "local" and current_type == "local":
+            return left, right + 1
+
+
+class SliceResultSingleTypeDataMixin(BaseSliceResultMixin, AbstractSliceMixin, AbstractResultMixin):
+    """ В срезе сначала будут представлены данные из одного из источников, а потом, по мере исчерпания, из другого.
+     Например: срез [0:10] - Будет состоять только из локальных нод, а срез [10: 20] - из нод из бд. """
+    FIRST_ITEMS_TYPE: Literal["db", "local"] = "local"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.FIRST_ITEMS_TYPE not in ("db", "local",):
+            raise ValueError
+
+    def get_local_nodes(self, *args, **kwargs):
+        if self.UNIFORM_SAMPLING_DB_AND_CACHE:
+            if hasattr(super(), "get_local_nodes"):
+                return super().get_local_nodes(*args, **kwargs)
+            return super()._get_local_nodes(*args, **kwargs)
+        self._current_call_counter = self._call_counter.__next__()
+        left, right = self._get_slice_index("local")
+        if self._current_call_counter == 1:
+            if self.FIRST_ITEMS_TYPE == "local":
+                if hasattr(super(), "get_local_nodes"):
+                    items = super().get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+                    if items is None:
+                        return self._get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+                    return items
+                return self._get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+            else:
+                if hasattr(super(), "get_nodes_from_database"):
+                    items = super().get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+                    if items is None:
+                        return self._get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+                    return items
+                return self._get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+        if self._current_call_counter == 2:
+            if self.FIRST_ITEMS_TYPE == "local":
+                if hasattr(super(), "get_nodes_from_database"):
+                    items = super().get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+                    if items is None:
+                        return self._get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+                    return items
+                return self._get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+            else:
+                if hasattr(super(), "get_local_nodes"):
+                    items = super().get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+                    if items is None:
+                        return self._get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+                    return items
+                return self._get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+
+    def get_nodes_from_database(self, *args, **kwargs):
+        if self.UNIFORM_SAMPLING_DB_AND_CACHE:
+            if hasattr(super(), "get_nodes_from_database"):
+                return super().get_nodes_from_database(*args, **kwargs)
+            return self._get_nodes_from_database(*args, **kwargs)
+        self._current_call_counter = next(self._call_counter)
+        left, right = self._get_slice_index("db")
+        if self._current_call_counter == 1:
+            if self.FIRST_ITEMS_TYPE == "db":
+                if hasattr(super(), "get_nodes_from_database"):
+                    items = super().get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+                    if items is None:
+                        return self._get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+                    return items
+                return self._get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+            if hasattr(super(), "get_local_nodes"):
+                items = super().get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+                if items is None:
+                    return self._get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+                return items
+            return self._get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+        if self._current_call_counter == 2:
+            if self.FIRST_ITEMS_TYPE == "db":
+                if hasattr(super(), "get_local_nodes"):
+                    items = super().get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+                    if items is None:
+                        return self._get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+                    return items
+                return self._get_local_nodes(*args, left_border=left, right_border=right, **kwargs)
+            if hasattr(super(), "get_nodes_from_database"):
+                items = super().get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+                if items is None:
+                    return self._get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+                return items
+            return self._get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
+
+    def _get_slice_index(self, current_type):
+        if not self._is_slice:
+            return self._left_border, self._right_border
+        if self._only_local or self._only_db:
+            return self._left_border, self._right_border
+        if self._current_call_counter == 1:
+            if self.FIRST_ITEMS_TYPE == current_type:
+                return self._left_border, self._right_border
+            return 0, 0
+        if self._current_call_counter == 2:
+            if not self.FIRST_ITEMS_TYPE == current_type:
+                return self._left_border, self._right_border
+            return 0, 0
+
+
+class ResultPaginator:
     ITEMS_ON_PAGE = ITEMS_ON_PAGE  # float("inf") - пагинатор выключен
 
     def __init__(self, *a, items_on_page=None, current_page=None, **k):
-        super().__init__(*a, **k)
         self.__page = 1
         self.__items_on_page = items_on_page or self.ITEMS_ON_PAGE
         self.__is_valid(items_on_page=self.__items_on_page, current_page=self.__page)
@@ -325,8 +578,11 @@ class ResultPaginatorMixin(AbstractResultMixin):
     def pages_count(self):
         return math.ceil(self.__len__() / self.__items_on_page)
 
-    @staticmethod
-    def __is_valid(items_on_page=None, current_page=None):
+    @classmethod
+    def __is_valid(cls, items_on_page=None, current_page=None):
+        if not issubclass(cls, SliceResultSingleTypeDataMixin) \
+                    or not issubclass(cls, SliceResultMultiTypeDataMixin):
+            raise RuntimeError
         if not isinstance(items_on_page, (int, float,)):
             raise TypeError
         if type(items_on_page) is float:
@@ -338,147 +594,3 @@ class ResultPaginatorMixin(AbstractResultMixin):
             raise TypeError
         if current_page <= 0:
             raise ValueError
-
-
-class SliceResultMixin(AbstractResultMixin):
-    """ Функционал для контроля численности выборки в виде реализации среза. Мемоизация параметров среза."""
-    ROUNDING_POLICY: Literal["+", "-"] = ""  # Округление количества элементов в + или в -
-    RESIDUAL_ITEM: Literal["db", "local", "none"] = "none"  # Пример: в результате есть 4 элема БД и 3 из локалки,
-    # - кому будет отдано предпочтение оказаться лишним - четвёртым,
-    # если общее кол-во элемов в срезе 6, а частное от деления на 2 - 3.
-    # или отдавать предпочтение сначала одному из типов до исчерпания, а затем давать из второго типа
-    merge = abstractmethod(lambda: ...)  # Слияние данных из базы данных и локальной очереди в 1 общий контейнер
-
-    def __init__(self, *a, only_local=False, only_database=False, **kwargs):
-        self._is_slice = False
-        self.__left_border = 0
-        self.__right_border = float("inf")
-        self.__only_local = only_local
-        self.__only_db = only_database
-        super().__init__(*a, only_local=only_local, only_database=only_database, **kwargs)
-
-    def get_nodes_from_database(self, **kwargs):
-        left, right = self._get_slice_index(current_type="db")
-        if hasattr(super(), "get_nodes_from_database"):
-            items = super().get_nodes_from_database(left_border=left, right_border=right, **kwargs)
-            if items is not None:  # if abstract
-                return items
-        return self._get_nodes_from_database(left_border=left, right_border=right, **kwargs)
-
-    def get_local_nodes(self, **kwargs):
-        left, right = self._get_slice_index(current_type="local")
-        if hasattr(super(), "get_local_nodes"):
-            items = super().get_local_nodes(left_border=left, right_border=right, **kwargs)
-            if items is not None:  # if abstract
-                return items
-        return self._get_local_nodes(left_border=left, right_border=right, **kwargs)
-
-    def reset_slice(self):
-        self._is_slice = False
-        self.__left_border, self.__right_border = 0, float("inf")
-
-    @classmethod
-    def change_slice_value_on_items_length(cls, items, left, right):
-        """ Ограничить срез длиной срезаемых результатов """
-        if not hasattr(items, "__iter__"):
-            raise TypeError("Не является итерируемым объектом")
-        cls.__is_valid_slice_params(left, right)
-        items_length = len(items)
-        return left, right if items_length > right else items_length
-
-    def __getitem__(self, item: slice):
-        """ Срез начинается с 1, правая граница не входит, шаг всегда 1 """
-        if type(item) is not slice:
-            raise TypeError
-        start = item.start if item.start is not None else 1
-        stop = item.stop if item.stop is not None else float("inf")
-        if item.start == 0:
-            raise ValueError("Срез начинается с 1")
-        self.__is_valid_slice(start - 1, stop - 1, item.step)
-        self.__left_border = start - 1
-        self.__right_border = stop - 1
-        self._is_slice = True
-
-    def _slice_items(self, result_items, left=None, right=None):
-        self.__is_valid_result_items(result_items)
-        if left is None:
-            left = self.__left_border
-        if right is None:
-            right = self.__right_border
-        self.__is_valid_slice_params(left, right)
-        if not self._is_slice:
-            return result_items
-        left, right = self.change_slice_value_on_items_length(left, right, result_items)
-        return result_items[left:right]
-
-    def _get_slice_index(self, current_type: Literal["db", "local"]) -> tuple:
-        if current_type not in ("db", "local",):
-            raise ValueError
-        if not self._is_slice:
-            return self.__left_border, self.__right_border
-        if self.__only_db or self.__only_local:
-            return self.__left_border, self.__right_border
-        if not self.__right_border - self.__left_border:
-            return 0, 0
-        length = (self.__right_border - self.__left_border) / 2
-        if not length == float("inf"):
-            length = math.floor(length) if self.ROUNDING_POLICY == "+" else math.ceil(length)
-        if not length:
-            length = 1
-        if length == 1:
-            if self.RESIDUAL_ITEM == "none":
-                return self.__left_border, self.__left_border
-            if self.RESIDUAL_ITEM == current_type:
-                return self.__left_border, self.__left_border + 1
-            else:
-                return self.__left_border, self.__left_border
-        if length == float("inf"):
-            return self.__left_border, float("inf")
-        left, right = None, None
-        if current_type == "db":
-            left, right = self.__left_border, length
-        elif current_type == "local":
-            left, right = length, self.__right_border
-        if not length % 2:
-            return left, right
-        if self.RESIDUAL_ITEM == "none":
-            return left, right
-        if self.RESIDUAL_ITEM == "db":
-            return left, right + 1
-        if self.RESIDUAL_ITEM == "local":
-            return left, right + 1
-
-    def __is_valid_slice(self, start, stop, step):
-        """ Левая часть среза начинается с 1, правая часть не входит """
-        if step is not None:
-            if not step == 1:
-                raise ValueError("Выборка с шагом не поддерживается, шаг всегда 1")
-        start = start if start is not None else 0
-        end = stop if stop is not None else float("inf")
-        self.__is_valid_slice_params(start, end)
-
-    @staticmethod
-    def __is_valid_slice_params(start, end):
-        if type(start) is not int:
-            raise TypeError
-        if not isinstance(end, (int, float)):
-            raise TypeError
-        if type(end) is float:
-            if not end == float("inf"):
-                raise ValueError
-        if start < 0:
-            raise ValueError
-        if end < 0:
-            raise ValueError
-        if start > end:
-            raise ValueError
-
-    @staticmethod
-    def __is_valid_result_items(items: Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"]):
-        if not isinstance(items, (ResultORMCollection, tuple,)):
-            raise TypeError
-        if type(items) is tuple:
-            if not items:
-                return
-            if type(items[0]) is not ResultORMCollection:
-                raise TypeError

@@ -10,7 +10,8 @@ from two_m_root.containers import ResultORMCollection, ServiceOrmContainer
 from two_m_root.nodes import ResultORMItem
 from two_m_root.tools import ModelTools
 from two_m_root.core import Tool
-from two_m_root.mixins import SliceResultMixin, OrderBySingleResultMixin, OrderByJoinResultMixin, ResultPaginatorMixin
+from two_m_root.mixins import SliceResultMultiTypeDataMixin, SliceResultSingleTypeDataMixin, \
+    OrderBySingleResultMixin, OrderByJoinResultMixin, ResultPaginator
 
 
 class ResultCacheTools(Tool):
@@ -26,6 +27,7 @@ class ResultCacheTools(Tool):
         if not self._id:
             raise ValueError
         self.__key = f"{self.TEMP_HASH_PREFIX}{self._id[-5:]}"
+        super().__init__(id_, *args, **kw)
 
     def _set_hash(self, nodes):
         self.__is_valid_nodes(nodes)
@@ -101,7 +103,7 @@ class ResultCacheTools(Tool):
             raise TypeError
 
 
-class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
+class BaseResult(SliceResultSingleTypeDataMixin, SliceResultMultiTypeDataMixin, ResultCacheTools, AbstractResult, ABC):
     TEMP_HASH_PREFIX: str = ...
     ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT = True  # Скрывать или не скрывать скрытые ноды из итерируемой последовательности
 
@@ -117,7 +119,8 @@ class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
         self._is_sort = False
         self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
         self.__is_valid()
-        super().__init__(self._id, only_local=only_local, only_database=only_database, **kwargs)
+        super().__init__(self._id, only_local=only_local, only_database=only_database,
+                         get_local_nodes=get_local_nodes, get_nodes_from_database=get_nodes_from_database, **kwargs)
         self._set_hash(self.items)
         self._set_primary_keys(self.__merged_data)
 
@@ -246,7 +249,7 @@ class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
             return True
 
     def __getitem__(self, item: Union[str, int, slice]):
-        if not isinstance(item, int):
+        if isinstance(item, slice):
             return super().__getitem__(item)
         return self.items[item]
 
@@ -295,7 +298,7 @@ class BaseResult(SliceResultMixin, ResultCacheTools, AbstractResult, ABC):
                 raise TypeError
 
 
-class Result(ResultPaginatorMixin, BaseResult, OrderBySingleResultMixin, ModelTools):
+class Result(OrderBySingleResultMixin, BaseResult, ResultPaginator, ModelTools):
     """ Экземпляр данного класса возвращается функцией Tool.get_items() """
     TEMP_HASH_PREFIX = "simple_item_hash"
 
@@ -324,7 +327,7 @@ class Result(ResultPaginatorMixin, BaseResult, OrderBySingleResultMixin, ModelTo
         self.is_valid_model_instance(self._model)
 
 
-class JoinSelectResult(ResultPaginatorMixin, BaseResult, OrderByJoinResultMixin, ModelTools):
+class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ResultPaginator, ModelTools):
     """
     Экземпляр этого класса возвращается функцией Tool.join_select()
     1 экземпляр этого класса 1 результат вызова Tool.join_select()
@@ -527,8 +530,7 @@ class JoinSelectResult(ResultPaginatorMixin, BaseResult, OrderByJoinResultMixin,
         result = []
         for item in data:
             nodes = ResultORMCollection(item, show_hidden_nodes=show_hidden_items)
-            if nodes:
-                result.append(nodes)
+            result.append(nodes) if nodes else None
         return tuple(result)
 
     def _sort_items(self, data, **kwargs):
