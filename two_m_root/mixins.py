@@ -74,9 +74,8 @@ class OrderByMixin(AbstractResultMixin):
         if hasattr(super(), "get_nodes_from_database"):
             nodes = super().get_nodes_from_database(**kwargs)
             if nodes is not None:  # is None if abstract
-                return self._sort_items(nodes, **kwargs)
-        nodes = self._get_nodes_from_database(**kwargs)
-        return self._sort_items(nodes, **kwargs)
+                return nodes
+        return self._get_nodes_from_database(**kwargs)
 
     def get_local_nodes(self, **kwargs):
         if self._is_sort:
@@ -84,17 +83,8 @@ class OrderByMixin(AbstractResultMixin):
         if hasattr(super(), "get_local_nodes"):
             nodes = super().get_local_nodes(**kwargs)
             if nodes is not None:  # is None if abstract
-                return self._sort_items(nodes, **kwargs)
-        nodes = self._get_local_nodes(**kwargs)
-        return self._sort_items(nodes, **kwargs)
-
-    @abstractmethod
-    def _sort_items(self, items, int_sort: Union[bool, str] = False,
-                   string_sort: Union[bool, str] = False,
-                   by_length=False, by_alphabet=False, by_create_time=False,
-                   reversed_=False):
-        """ Произвести сортировку контейнеров содержимого согласно переданным параметрам """
-        ...
+                return nodes
+        return self._get_local_nodes(**kwargs)
 
     def _create_params_to_sort_items(self) -> dict:
         """ Создать параметры, передаваемые в геттер данных, на основе параметров,
@@ -174,44 +164,18 @@ class OrderBySingleResultMixin(OrderByMixin):
     """ Реализация для 'одиночного результата',- запрос к одной таблице. См Tool.get_items() """
     def __init__(self, *a, **k):
         from two_m_root.result import Result
+        super().__init__(*a, **k)
         if not isinstance(self, Result):
             raise TypeError
         if not hasattr(self, "_model"):
             raise AttributeError
         ModelTools.is_valid_model_instance(self._model)
-        super().__init__(*a, **k)
 
     def order_by(self, by_column_name: Optional[str] = None, by_primary_key: Optional[bool] = None,
                  by_create_time: Optional[bool] = None, length: bool = False, alphabet: bool = False,
                  decr: Optional[bool] = None):
-        self._is_valid_order_by_params(self._model, by_column_name, by_primary_key, by_create_time, length, alphabet,
-                                       decr)
-        super().order_by(by_column_name, by_primary_key, by_create_time, length, alphabet,
-                                       decr)
-
-    def _sort_items(self, items: ServiceOrmContainer, int_sort: Union[bool, str] = False,
-                    string_sort: Union[bool, str] = False,
-                    by_length=False, by_alphabet=False, by_create_time=False,
-                    reversed_=False, **other_params):
-        self.__is_valid_data(items)
-        sorted_nodes = None
-        if string_sort:
-            sorted_nodes = LetterSortSingleNodes(self._model, string_sort, items, reverse=reversed_)
-            if by_alphabet:
-                return sorted_nodes.sort_by_alphabet()
-            if by_length:
-                return sorted_nodes.sort_by_string_length()
-        if int_sort:
-            sorted_nodes = NumberSortSingleNodes(self._model, int_sort, items, reverse=reversed_)
-            return sorted_nodes.sort()
-        if by_create_time:
-            sorted_nodes = ...
-        return items
-
-    @staticmethod
-    def __is_valid_data(items):
-        if not isinstance(items, ServiceOrmContainer):
-            raise TypeError
+        self._is_valid_order_by_params(self._model, by_column_name, by_primary_key, by_create_time, length, alphabet, decr)
+        super().order_by(by_column_name, by_primary_key, by_create_time, length, alphabet, decr)
 
 
 class OrderByJoinResultMixin(OrderByMixin, ModelTools):
@@ -237,23 +201,6 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
         self._model = model
         super().order_by(by_column_name, by_primary_key, by_create_time, length, alphabet, decr)
 
-    def _sort_items(self, items: tuple[ServiceOrmContainer], int_sort: Union[bool, str] = False,
-                    string_sort: Union[bool, str] = False,
-                    by_length=False, by_alphabet=False, by_create_time=False,
-                    reversed_=False, model_in_sort=None, **other_params):
-        self.__is_valid_data(items)
-        if int_sort:
-            return NumberSortNodesChain(model_in_sort, int_sort, items, reverse=reversed_).sort()
-        if string_sort:
-            instance = LetterSortNodesChain(model_in_sort, string_sort, items, reverse=reversed_)
-            if by_alphabet:
-                return instance.sort_by_alphabet()
-            if by_length:
-                return instance.sort_by_string_length()
-        if by_create_time:
-            ...  # todo
-        return items
-
     def _is_valid_order_by_params(self, model, by_column_name, by_primary_key, by_create_time, length, alphabet, decr):
         QueueItem.is_valid_model_instance(model)
         if by_column_name is not None:
@@ -262,14 +209,6 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
             raise ValueError
         self._model = model
         super()._is_valid_order_by_params(model, by_column_name, by_primary_key, by_create_time, length, alphabet, decr)
-
-    @staticmethod
-    def __is_valid_data(items):
-        if type(items) is not tuple:
-            raise TypeError
-        for nodes_group in items:
-            if not isinstance(nodes_group, ServiceOrmContainer):
-                raise TypeError
 
 
 class BaseSliceResultMixin:
