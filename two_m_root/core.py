@@ -15,7 +15,8 @@ from two_m_root.conf import RESERVED_WORDS, CustomModel
 from two_m_root.dill.serde import DillSerde
 from two_m_root.containers import Queue, ServiceOrmContainer
 from two_m_root.nodes import QueueItem, ServiceOrmItem
-from two_m_root.mixins import SliceResultMixin
+from two_m_root.mixins import BaseSliceResultMixin, OrderBySingleResultMixin, OrderByJoinResultMixin
+from two_m_root.sort import NumberSortSingleNodes, NumberSortNodesChain, LetterSortSingleNodes, LetterSortNodesChain
 from two_m_root.tools import ModelTools
 from two_m_root.database.postgres.exceptions import DatabaseException
 from two_m_root.exceptions import NodePrimaryKeyError, NodeColumnError, NodeColumnValueError, NodeAttributeError, \
@@ -200,9 +201,12 @@ class Tool(ModelTools):
             if left_border == right_border:
                 return ServiceOrmContainer()
             nodes = cls.connection.items.search_nodes(model, **attrs)
-            left_border, right_border = SliceResultMixin.change_slice_value_on_items_length(nodes, left_border, right_border)
+            sorted_nodes = cls.__sort_local_nodes(model_in_sort, nodes, int_sort=int_sort, string_sort=string_sort,
+                                                  by_create_time=by_create_time, by_length=by_length, by_alphabet=by_alphabet,
+                                                  reversed_=reversed_)
+            left_border, right_border = BaseSliceResultMixin.change_slice_value_on_items_length(nodes, left_border, right_border)
             output = ServiceOrmContainer()
-            [output.append(node_item=n) for n in nodes[left_border:right_border]]
+            [output.append(node_item=n) for n in sorted_nodes[left_border:right_border]]
             return output
         return Result(get_nodes_from_database=select_from_db, get_local_nodes=select_from_cache,
                       only_local=_queue_only, only_database=_db_only, model=model, where=attrs)
@@ -416,8 +420,12 @@ class Tool(ModelTools):
                                                by_length=by_length, by_alphabet=by_alphabet, by_create_time=by_create_time,
                                                reversed_=reversed_, model_in_sort=model_in_sort)
             output = tuple(compare_by_matched_fk())
-            left_border, right_border = SliceResultMixin.change_slice_value_on_items_length(output, left_border, right_border)
-            return output[left_border:right_border]
+            sorted_node_groups = cls.__sort_local_nodes_group(model_in_sort, output, int_sort=int_sort,
+                                                              string_sort=string_sort, by_length=by_length,
+                                                              by_alphabet=by_alphabet, by_create_time=by_create_time,
+                                                              reversed_=reversed_)
+            left_border, right_border = BaseSliceResultMixin.change_slice_value_on_items_length(output, left_border, right_border)
+            return sorted_node_groups[left_border:right_border]
 
         def get_local_nodes_without_foreign_key_nodes():
             """ Ноды, которые не найдены в локальном расположении.
@@ -720,6 +728,43 @@ class Tool(ModelTools):
         result = ServiceOrmContainer()
         [result.append(**{key: item.__dict__[key] for key in getattr(item.__class__, "column_names")}, _model=model, _insert=True) for item in items_db]
         return result
+
+    @staticmethod
+    def __sort_local_nodes(model, items: ServiceOrmContainer, int_sort: Union[bool, str] = False,
+                           string_sort: Union[bool, str] = False,
+                           by_length=False, by_alphabet=False, by_create_time=False,
+                           reversed_=False) -> ServiceOrmContainer:
+        sorted_nodes = None
+        if string_sort:
+            sorted_nodes = LetterSortSingleNodes(model, string_sort, items, reverse=reversed_)
+            if by_alphabet:
+                return sorted_nodes.sort_by_alphabet()
+            if by_length:
+                return sorted_nodes.sort_by_string_length()
+        if int_sort:
+            sorted_nodes = NumberSortSingleNodes(model, int_sort, items, reverse=reversed_)
+            return sorted_nodes.sort()
+        if by_create_time:
+            sorted_nodes = ...  # todo
+        return sorted_nodes
+
+    @staticmethod
+    def __sort_local_nodes_group(model,  items: Iterable[ServiceOrmContainer], int_sort: Union[bool, str] = False,
+                                 string_sort: Union[bool, str] = False,
+                                 by_length=False, by_alphabet=False, by_create_time=False,
+                                 reversed_=False):
+        sorted_nodes = None
+        if int_sort:
+            sorted_nodes = NumberSortNodesChain(model, int_sort, items, reverse=reversed_).sort()
+        if string_sort:
+            instance = LetterSortNodesChain(model, string_sort, items, reverse=reversed_)
+            if by_alphabet:
+                sorted_nodes = instance.sort_by_alphabet()
+            if by_length:
+                sorted_nodes = instance.sort_by_string_length()
+        if by_create_time:
+            ...  # todo
+        return sorted_nodes
 
 
 class SQLAlchemyQueryManager:
