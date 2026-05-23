@@ -63,6 +63,7 @@ class LinkedList:
             node = self.LinkedListItem(**kwargs)
         if not self:
             self._head = self._tail = node
+            node.index = 1
             return node
         first_elem = self._head
         if self._head == self._tail:
@@ -88,6 +89,7 @@ class LinkedList:
             prev_node.next = new_node
         if next_node is not None:
             next_node.prev = new_node
+        return next_node
 
     def __getitem__(self, index):
         if type(index) is slice:
@@ -328,6 +330,7 @@ class SuperQueue(LinkedList):
             new_item = self.LinkedListItem(*args, **kwargs)
         new_item = super().append(node_item=new_item)  # O(1)
         self.__add_node(new_item)  # O(1)
+        return new_item
 
     def add_to_head(self, node_item=None, **kwargs):  # O(n)
         if node_item is not None:
@@ -338,6 +341,7 @@ class SuperQueue(LinkedList):
         super().add_to_head(node_item=node_item)  # O(n)
         self.__reset_mappings_and_indexes()  # O(n)
         self.__add_node(new_item)  # O(1)
+        return new_item
 
     def replace(self, old_node, new_node):  # O(1)
         self.__is_valid_node(old_node)  # O(1)
@@ -348,6 +352,7 @@ class SuperQueue(LinkedList):
                                          *old_node.get_primary_key_and_value(as_tuple=True))  # O(k)
         self.__items_hash_map[hash_val] = new_node  # O(1)
         self.__node_index_hash_map[new_node.index] = hash_val  # O(1)
+        return new_node
 
     def __getitem__(self, node_index):  # O(1)
         if not isinstance(node_index, (int, slice,)):
@@ -495,6 +500,7 @@ class Queue(LinkedList):
         self._check_primary_key_unique(new_item)  # O(n)
         self._check_unique_values(new_item, check_fk_values=_remove_fk)  # O(k)
         self.append(**new_item.get_attributes())  # O(1)
+        return new_item
 
     def dequeue(self) -> Optional[QueueItem]:
         """ Извлечение ноды с начала очереди """
@@ -531,6 +537,8 @@ class Queue(LinkedList):
         return container
 
     def search_nodes(self, model: Type[CustomModel], negative_selection=False, or_mode=True,
+                     output_type: Optional[Union["Queue", "ServiceResultOrmContainer",
+                                        "ServiceOrmContainer"]] = None,
                      **_filter: dict[str, Union[str, int, Literal["*"]]]) -> "Queue":  # O(n)
         """
         Искать ноды по совпадениям любых полей.
@@ -538,10 +546,15 @@ class Queue(LinkedList):
         :param _filter: словарь содержащий набор полей и их значений для поиска, вместо значений допустим знак '*',
         который будет засчитывать любые значения у полей.
         :param negative_selection: режим отбора нод (найти ноды КРОМЕ ... [filter])
-        :param or_mode: Режим, когда работает правило ИЛИ при передаче нескольких стольцов и значений
+        :param or_mode: Режим, когда работает правило ИЛИ при передаче нескольких столбцов и значений
+        :param output_type: Получить выходные данные в контейнере, отличном по типу от self.__class__
         """
         QueueItem.is_valid_model_instance(model)
-        items = self.__class__()
+        if output_type is not None:
+            if output_type is not type(self) and output_type is not ServiceOrmContainer and \
+                    output_type is not ServiceResultOrmContainer:
+                raise TypeError
+        items = self.__class__() if output_type is None else output_type()
         nodes = iter(self)
         while nodes:
             try:
@@ -781,14 +794,14 @@ class ServiceOrmContainer(Queue):
     def hash_by_pk(self):
         return sum(map(lambda x: x.hash_by_pk, self))
 
-    def __getitem__(self, model_name_or_index: Union[str, int]) -> Union[DoesNotExists, "ServiceOrmItem", "ResultORMItem"]:
-        if not isinstance(model_name_or_index, (str, int,)):
+    def __getitem__(self, item: Union[str, int, slice]) -> Union[DoesNotExists, "ServiceOrmItem", "ResultORMItem"]:
+        if not isinstance(item, (str, int, slice)):
             raise TypeError
-        if type(model_name_or_index) is int:
-            return super().__getitem__(model_name_or_index)
+        if type(item) is int or isinstance(item, slice):
+            return super().__getitem__(item)
         nodes = self.__class__()
         for node in self:
-            if node.model.__name__ == model_name_or_index:
+            if node.model.__name__ == item:
                 nodes.append(**node.get_attributes())
         if len(nodes) > 1:
             return nodes
@@ -824,7 +837,7 @@ class ResultORMCollection:
     CONTAINER = ServiceResultOrmContainer  # Тип, хранимый внутри, имутабелен
 
     def __init__(self, collection: "ServiceOrmContainer", prefix_mode=None, show_hidden_nodes=None):
-        def is_valid(items):
+        def is_valid_collection(items):
             if type(items) is not ServiceOrmContainer:
                 raise TypeError
             if type(self._prefix_mode) is not str:
@@ -839,7 +852,11 @@ class ResultORMCollection:
                 raise TypeError
         self._prefix_mode = prefix_mode if prefix_mode is not None else self.ADD_TABLE_NAME_PREFIX
         self._show_hidden = show_hidden_nodes
-        is_valid(collection)
+        if self._prefix_mode not in ("auto", "add", "no-prefix",):
+            raise ValueError
+        if not isinstance(self._show_hidden, bool):
+            raise TypeError
+        is_valid_collection(collection)
         self.__collection = self.__convert_node_data(collection)
         self.__collection = self.__filter_nodes(self.__collection)
         self.remove_model_prefix()
@@ -962,25 +979,21 @@ class ResultORMCollection:
     @classmethod
     def __convert_node_data(cls, collection: ServiceOrmContainer):
         new_collection = cls.CONTAINER()
-        [new_collection.append(node.model, node.get_primary_key_and_value(),
-                               **({"_ui_hidden": True
-                                  if node.type == "_delete" else False}),
-                               **node.value)
+        [new_collection.append(
+            model=node.model, primary_key=node.get_primary_key_and_value(), created_at=node.created_at,
+            **({"_ui_hidden": True
+                if node.type == "_delete" else False}),
+            **node.value)
          for node in collection]
         return new_collection
 
     def __filter_nodes(self, collection: ServiceResultOrmContainer) -> ServiceResultOrmContainer:
         if type(collection) is not self.CONTAINER:
             raise TypeError
-        if self._show_hidden is None:
+        if self._show_hidden:
             return collection
         new_items = self.CONTAINER()
-        if not self._show_hidden:
-            [new_items.append(**node.get_attributes())
-             for node in self
-             if not node.hidden]
-        if self._show_hidden:
-            [new_items.append(**node.get_attributes())
-             for node in self
-             if node.hidden]
+        [new_items.append(**node.get_attributes())
+         for node in self
+         if not node.hidden]
         return new_items

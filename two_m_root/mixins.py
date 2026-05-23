@@ -3,14 +3,15 @@ Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
 """
 import math
 from abc import abstractmethod
-from typing import Union, Optional, Literal
+from typing import Union, Optional, Literal, Iterable
 from itertools import cycle
 from two_m_root.abstractions import AbstractResultMixin, AbstractSliceMixin
 from two_m_root.conf import CustomModel
 from two_m_root.tools import ModelTools
 from two_m_root.containers import ServiceOrmContainer, ResultORMCollection
 from two_m_root.nodes import QueueItem
-from two_m_root.sort import LetterSortSingleNodes, LetterSortNodesChain, NumberSortSingleNodes, NumberSortNodesChain
+from two_m_root.sort import LetterSortSingleNodes, LetterSortNodesChain, NumberSortSingleNodes, NumberSortNodesChain, \
+    TimeSortSingleNodes, TimeSortNodesChain
 from two_m.main import ITEMS_ON_PAGE, BY_PRIMARY_KEY, BY_COLUMN_NAME, BY_CREATE_TIME, BY_ALPHABET, BY_STRING_LENGTH, REVERSED
 
 
@@ -26,14 +27,6 @@ class OrderByMixin(AbstractResultMixin):
 
     def __init__(self: Union["Result", "JoinSelectResult"], *args, **kwargs):
         from two_m_root.result import BaseResult, Result, JoinSelectResult
-        if not hasattr(self, "_get_local_nodes"):
-            raise AttributeError
-        if not hasattr(self, "_get_nodes_from_database"):
-            raise AttributeError
-        if not callable(self.get_local_nodes):
-            raise TypeError
-        if not callable(self.get_nodes_from_database):
-            raise AttributeError
         if not isinstance(self, (Result, JoinSelectResult,)):
             raise TypeError
         if not issubclass(self.__class__, BaseResult):
@@ -86,10 +79,49 @@ class OrderByMixin(AbstractResultMixin):
                 return nodes
         return self._get_local_nodes(**kwargs)
 
+    @staticmethod
+    def _is_valid_sort_params(int_sort=False, string_sort=False,
+                              by_length=False, by_alphabet=False, by_create_time=False,
+                              reversed_=False):
+        if not isinstance(int_sort, (bool, str)):
+            raise TypeError
+        if type(int_sort) is str:
+            if not int_sort:
+                raise ValueError("Не может быть пустой строки")
+        if type(int_sort) is bool:
+            if int_sort:
+                raise ValueError("Нужно передать строку-наименование столбца, "
+                                 "по которому будет производиться сортировка")
+        if not isinstance(string_sort, (bool, str,)):
+            raise TypeError
+        if type(string_sort) is str:
+            if not string_sort:
+                raise ValueError("Не может быть пустой строки")
+        if type(string_sort) is bool:
+            if string_sort:
+                raise ValueError("Нужно передать строку-наименование столбца, "
+                                 "по которому будет производиться сортировка")
+        if not type(by_create_time) is bool:
+            raise TypeError
+        if sum(map(lambda x: bool(x), (int_sort, string_sort, by_create_time,))) not in (0, 1,):
+            raise ValueError("Нужно использовать только один из этих вариантов: "
+                             "int_sort, string_sort, by_create_time")
+        if type(by_length) is not bool:
+            raise TypeError
+        if type(by_alphabet) is not bool:
+            raise TypeError
+        if not int_sort and not by_create_time and not string_sort:
+            return
+        if string_sort:
+            if not sum((by_length, by_alphabet,)) == 1:
+                raise ValueError
+        if type(reversed_) is not bool:
+            raise TypeError
+
     def _create_params_to_sort_items(self) -> dict:
         """ Создать параметры, передаваемые в геттер данных, на основе параметров,
         переданных и мемоизированных, со стороны пользователя. """
-        output = {"model_in_sort": self._model}
+        output = {"model_in_sort": self._model, "is_sort": self._is_sort}
         if not self._is_sort:
             return {}
         if self._by_primary_key:
@@ -158,17 +190,16 @@ class OrderByMixin(AbstractResultMixin):
             if ModelTools.get_column_python_type(model, by_column_name) is int:
                 if length or alphabet:
                     raise ValueError
-
+                
 
 class OrderBySingleResultMixin(OrderByMixin):
     """ Реализация для 'одиночного результата',- запрос к одной таблице. См Tool.get_items() """
-    def __init__(self, *a, **k):
+    def __init__(self, *a, model=None, **k):
         from two_m_root.result import Result
-        super().__init__(*a, **k)
+        self._model = model
+        super().__init__(*a, model=model, **k)
         if not isinstance(self, Result):
             raise TypeError
-        if not hasattr(self, "_model"):
-            raise AttributeError
         ModelTools.is_valid_model_instance(self._model)
 
     def order_by(self, by_column_name: Optional[str] = None, by_primary_key: Optional[bool] = None,
@@ -176,6 +207,31 @@ class OrderBySingleResultMixin(OrderByMixin):
                  decr: Optional[bool] = None):
         self._is_valid_order_by_params(self._model, by_column_name, by_primary_key, by_create_time, length, alphabet, decr)
         super().order_by(by_column_name, by_primary_key, by_create_time, length, alphabet, decr)
+
+    @classmethod
+    def sort_items(cls, model, items: ServiceOrmContainer,  int_sort: Union[bool, str] = False,
+                   string_sort: Union[bool, str] = False,
+                   by_length=False, by_alphabet=False, by_create_time=False,
+                   reversed_=False):
+        ModelTools.is_valid_model_instance(model)
+        if type(items) is not ServiceOrmContainer:
+            raise TypeError
+        cls._is_valid_sort_params(int_sort=int_sort, string_sort=string_sort, 
+                                  by_create_time=by_create_time, by_length=by_length, by_alphabet=by_alphabet,
+                                  reversed_=reversed_)
+        sorted_nodes = items
+        if string_sort:
+            sorted_nodes = LetterSortSingleNodes(model, string_sort, items, reverse=reversed_)
+            if by_alphabet:
+                return sorted_nodes.sort_by_alphabet()
+            if by_length:
+                return sorted_nodes.sort_by_string_length()
+        if int_sort:
+            sorted_nodes = NumberSortSingleNodes(model, int_sort, items, reverse=reversed_)
+            return sorted_nodes.sort()
+        if by_create_time:
+            sorted_nodes = TimeSortSingleNodes(model, items)
+        return sorted_nodes.sort()
 
 
 class OrderByJoinResultMixin(OrderByMixin, ModelTools):
@@ -200,6 +256,42 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
                                        decr)
         self._model = model
         super().order_by(by_column_name, by_primary_key, by_create_time, length, alphabet, decr)
+
+    @classmethod
+    def sort_items(cls, model, items: Iterable[ServiceOrmContainer], int_sort: Union[bool, str] = False,
+                   string_sort: Union[bool, str] = False,
+                   by_length=False, by_alphabet=False, by_create_time=False,
+                   reversed_=False, **k):
+        if not hasattr(items, "__iter__") or not hasattr(items, "__getitem__"):
+            raise TypeError
+        if not items:
+            return
+        if type(items[0]) is not ServiceOrmContainer:
+            raise TypeError
+        cls._is_valid_sort_params(model_in_sort=model, int_sort=int_sort, string_sort=string_sort, 
+                                  by_create_time=by_create_time, by_length=by_length, by_alphabet=by_alphabet,
+                                  reversed_=reversed_)
+        sorted_nodes = items
+        if int_sort:
+            sorted_nodes = NumberSortNodesChain(model, int_sort, items, reverse=reversed_).sort()
+        if string_sort:
+            instance = LetterSortNodesChain(model, string_sort, items, reverse=reversed_)
+            if by_alphabet:
+                sorted_nodes = instance.sort_by_alphabet()
+            if by_length:
+                sorted_nodes = instance.sort_by_string_length()
+        if by_create_time:
+            instance = TimeSortNodesChain(model, items, reverse=reversed_)
+            sorted_nodes = instance.sort()
+        return sorted_nodes
+
+    @classmethod
+    def _is_valid_sort_params(cls, model_in_sort=None, **kwargs):
+        super()._is_valid_sort_params(**kwargs)
+        if model_in_sort is None:
+            raise TypeError("Таблица, по которой происходит сортировка - необходима")
+        else:
+            cls.is_valid_model_instance(model_in_sort)
 
     def _is_valid_order_by_params(self, model, by_column_name, by_primary_key, by_create_time, length, alphabet, decr):
         QueueItem.is_valid_model_instance(model)
@@ -235,7 +327,7 @@ class BaseSliceResultMixin:
         """ Ограничить срез длиной срезаемых результатов """
         if not hasattr(items, "__iter__"):
             raise TypeError("Не является итерируемым объектом")
-        cls._is_valid_slice_params(left, right)
+        cls._is_valid_slice(left, right)
         items_length = len(items)
         return left, right if items_length > right else items_length
 
@@ -252,17 +344,14 @@ class BaseSliceResultMixin:
         self._right_border = stop - 1
         self._is_slice = True
 
-    def _is_valid_slice(self, start, stop, step):
+    @staticmethod
+    def _is_valid_slice(start, stop, step=1):
         """ Левая часть среза начинается с 1, правая часть не входит """
         if step is not None:
             if not step == 1:
                 raise ValueError("Выборка с шагом не поддерживается, шаг всегда 1")
         start = start if start is not None else 0
         end = stop if stop is not None else float("inf")
-        self._is_valid_slice_params(start, end)
-
-    @staticmethod
-    def _is_valid_slice_params(start, end):
         if type(start) is not int:
             raise TypeError
         if not isinstance(end, (int, float)):
