@@ -221,7 +221,6 @@ class QueueItem(LinkedListItem, ModelTools, NodeTools, AbsQueueNode):
 
 class ServiceOrmItem(QueueItem, AbsQueueNode):
     """ Данный тип нод используется для вывода результата """
-
     @property
     def hash_by_pk(self):
         str_ = "".join(map(str, self.get_primary_key_and_value(as_tuple=True)))
@@ -240,7 +239,7 @@ class ServiceOrmItem(QueueItem, AbsQueueNode):
         value = self.value
         if ModelTools.is_autoincrement_primary_key(self.model):
             del value[self.get_primary_key_and_value(only_key=True)]
-        str_ = "".join(map(lambda x: str(x), itertools.chain(*value.items())))
+        str_ = "".join(map(str, itertools.chain(*value.items())))
         return int.from_bytes(hashlib.md5(str_.encode("utf-8")).digest(), "big")
 
     def __eq__(self, other: "ServiceOrmItem"):
@@ -269,10 +268,11 @@ class ServiceOrmItem(QueueItem, AbsQueueNode):
 
 
 class ResultORMItem(LinkedListItem, NodeTools, AbsQueueNode):
-    def __init__(self, _model, _primary_key: Optional[dict], _ui_hidden=False, **k):
-        self._primary_key = _primary_key
-        self._model = _model
-        self._hidden = _ui_hidden
+    def __init__(self, model=None, primary_key=None, created_at=None, _ui_hidden=False, **k):
+        self._primary_key = primary_key
+        self._model = model
+        self._hidden = _ui_hidden  # Является ли нода скрытой от отображения при вызове __str__ или __repr__ контейнера
+        self._time = created_at
         super().__init__(**self.__clean_kwargs(k))
         self.__is_valid()
 
@@ -283,6 +283,10 @@ class ResultORMItem(LinkedListItem, NodeTools, AbsQueueNode):
     @property
     def hidden(self):
         return self._hidden
+
+    @property
+    def created_at(self):
+        return self._time
 
     @property
     def hash_by_pk(self):
@@ -353,7 +357,8 @@ class ResultORMItem(LinkedListItem, NodeTools, AbsQueueNode):
         self._val = new_values
 
     def get_attributes(self):
-        return {"_model": self._model, "_primary_key": self._primary_key, "_ui_hidden": self._hidden, **self._val}
+        return {"model": self._model, "primary_key": self._primary_key, "created_at": self._time,
+                "_ui_hidden": self._hidden, **self._val}
 
     def __bool__(self):
         if not self.value:
@@ -392,7 +397,8 @@ class ResultORMItem(LinkedListItem, NodeTools, AbsQueueNode):
         return f"{self.__class__.__name__}({self.__str__()})"
 
     def __str__(self):
-        return f"{self.model}, {self._primary_key}, {', '.join(map(lambda x: '='.join(map(str, x)) ,self._val.items()))}"
+        return f"model={self.model}, primary_key={self._primary_key}, created_at={self._time}, " \
+               f"{', '.join(map(lambda x: '='.join(map(str, x)) , self._val.items()))}"
 
     @staticmethod
     def __clean_kwargs(kwargs_dict) -> dict:
@@ -400,6 +406,8 @@ class ResultORMItem(LinkedListItem, NodeTools, AbsQueueNode):
 
     def __is_valid(self):
         if type(self._hidden) is not bool:
+            raise TypeError
+        if not isinstance(self._time, datetime.datetime):
             raise TypeError
         if type(self._val) is not dict:
             raise TypeError

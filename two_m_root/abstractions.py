@@ -77,6 +77,10 @@ class AbsQueueNode(ABC):
     def get_primary_key_and_value(self, only_key=False, only_value=False, as_tuple=False):
         pass
 
+    @abstractmethod
+    def get_attributes(self):
+        pass
+
 
 class AbsSort(ABC):
     def __init__(self, model, column_name, *args, reverse=False, **kw):
@@ -152,6 +156,12 @@ class AbstractResult:
         Обычно удобно скрывать ноды с dml _delete - True. """
         ...
         return ...
+
+    @abstractmethod
+    def _final_sort_items(self, merged_data: Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"]):
+        """ Окончательная сортировка предварительно отсортированных нод из 2 разных источников:
+         из локальных и из бд """
+        ...
 
 
 class AbstractSliceMixin:

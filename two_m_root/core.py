@@ -16,7 +16,6 @@ from two_m_root.dill.serde import DillSerde
 from two_m_root.containers import Queue, ServiceOrmContainer
 from two_m_root.nodes import QueueItem, ServiceOrmItem
 from two_m_root.mixins import BaseSliceResultMixin, OrderBySingleResultMixin, OrderByJoinResultMixin
-from two_m_root.sort import NumberSortSingleNodes, NumberSortNodesChain, LetterSortSingleNodes, LetterSortNodesChain
 from two_m_root.tools import ModelTools
 from two_m_root.database.postgres.exceptions import DatabaseException
 from two_m_root.exceptions import NodePrimaryKeyError, NodeColumnError, NodeColumnValueError, NodeAttributeError, \
@@ -162,20 +161,27 @@ class Tool(ModelTools):
         def select_from_db(left_border=0, right_border=float("inf"),
                            int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                            by_length=False, by_alphabet=False, by_create_time=False,
-                           reversed_=False, model_in_sort=model):
-            cls.__is_valid_params__data_getter(left_border=left_border, right_border=right_border,
-                                               int_sort=int_sort, string_sort=string_sort,
-                                               by_length=by_length, by_alphabet=by_alphabet, by_create_time=by_create_time,
-                                               reversed_=reversed_, model_in_sort=model_in_sort)
+                           reversed_=False):
             if left_border == right_border:
                 return ServiceOrmContainer()
             try:
                 items_db = cls.connection.database.query(model)
-                if int_sort or string_sort:
+                if int_sort:
                     if reversed_:
-                        items_db = items_db.order_by(desc(int_sort or string_sort))
+                        items_db = items_db.order_by(desc(int_sort))
                     else:
-                        items_db = items_db.order_by(int_sort or string_sort)
+                        items_db = items_db.order_by(int_sort)
+                if string_sort:
+                    if by_length:
+                        if reversed_:
+                            items_db = items_db.order_by(desc(func.length(model, string_sort)))
+                        else:
+                            items_db = items_db.order_by(func.length(string_sort))
+                    if by_alphabet:
+                        if reversed_:
+                            items_db = items_db.order_by(desc(string_sort))
+                        else:
+                            items_db = items_db.order_by(string_sort)
                 if by_create_time:
                     items_db = items_db.order_by("_create_at")
                 if left_border:
@@ -193,17 +199,13 @@ class Tool(ModelTools):
         def select_from_cache(left_border=0, right_border=float("inf"),
                               int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                               by_length=False, by_alphabet=False, by_create_time=False,
-                              reversed_=False, model_in_sort=None):
-            cls.__is_valid_params__data_getter(left_border=left_border, right_border=right_border,
-                                               int_sort=int_sort, string_sort=string_sort,
-                                               by_length=by_length, by_alphabet=by_alphabet, by_create_time=by_create_time,
-                                               reversed_=reversed_, model_in_sort=model_in_sort)
+                              reversed_=False):
             if left_border == right_border:
                 return ServiceOrmContainer()
-            nodes = cls.connection.items.search_nodes(model, **attrs)
-            sorted_nodes = cls.__sort_local_nodes(model_in_sort, nodes, int_sort=int_sort, string_sort=string_sort,
-                                                  by_create_time=by_create_time, by_length=by_length, by_alphabet=by_alphabet,
-                                                  reversed_=reversed_)
+            nodes = cls.connection.items.search_nodes(model, output_type=ServiceOrmContainer, **attrs)
+            sorted_nodes = OrderBySingleResultMixin.sort_items(_model, nodes, int_sort=int_sort, string_sort=string_sort,
+                                                               by_create_time=by_create_time, by_length=by_length, by_alphabet=by_alphabet,
+                                                               reversed_=reversed_)
             left_border, right_border = BaseSliceResultMixin.change_slice_value_on_items_length(nodes, left_border, right_border)
             output = ServiceOrmContainer()
             [output.append(node_item=n) for n in sorted_nodes[left_border:right_border]]
@@ -257,7 +259,7 @@ class Tool(ModelTools):
         def collect_db_data(left_border=0, right_border=float("inf"),
                             int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                             by_length=False, by_alphabet=False, by_create_time=False,
-                            reversed_=False, model_in_sort=None):
+                            reversed_=False, model_in_sort=None, **kwargs):
             """
             Функция для извлечения данных из базы данных
             :param left_border: Левая часть среза результата
@@ -356,10 +358,6 @@ class Tool(ModelTools):
                         if current_node_data:
                             row.append(_model=model, _insert=True, **current_node_data)  # O(l)
                     yield row
-            cls.__is_valid_params__data_getter(left_border=left_border, right_border=right_border,
-                                               int_sort=int_sort, string_sort=string_sort,
-                                               by_length=by_length, by_alphabet=by_alphabet, by_create_time=by_create_time,
-                                               reversed_=reversed_, model_in_sort=model_in_sort)
             sql_text = create_request()
             query: CursorResult = eval(sql_text, {
                 "db": cls.connection.database,
@@ -372,10 +370,10 @@ class Tool(ModelTools):
             return tuple(add_joined_db_items_to_orm_queue(query))
 
         def collect_all_local_nodes():
-            heap = Queue()
+            heap = ServiceOrmContainer()
             temp = cls.connection.items
             for model in models:  # O(n)
-                heap += temp.search_nodes(model, **where.get(model.__name__, {}))
+                heap += temp.search_nodes(model, output_type=ServiceOrmContainer, **where.get(model.__name__, {}))
             return heap
 
         def collect_node_values(on_keys_or_values: Union[dict.keys, dict.values], null_values=False):
@@ -392,7 +390,7 @@ class Tool(ModelTools):
                             if node.value[table_column] is None:
                                 yield node.model.__name__, node, table_column
 
-        def collect_local_data(left_border=0, right_border=float("inf"),
+        def collect_local_data(is_sort=False, left_border=0, right_border=float("inf"),
                                int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                                by_length=False, by_alphabet=False, by_create_time=False,
                                reversed_=False, model_in_sort=None) -> Iterator[ServiceOrmContainer]:
@@ -415,15 +413,14 @@ class Tool(ModelTools):
                                     raw.append(**right_node.get_attributes())
                         if raw:
                             yield raw
-            cls.__is_valid_params__data_getter(left_border=left_border, right_border=right_border,
-                                               int_sort=int_sort, string_sort=string_sort,
-                                               by_length=by_length, by_alphabet=by_alphabet, by_create_time=by_create_time,
-                                               reversed_=reversed_, model_in_sort=model_in_sort)
             output = tuple(compare_by_matched_fk())
-            sorted_node_groups = cls.__sort_local_nodes_group(model_in_sort, output, int_sort=int_sort,
-                                                              string_sort=string_sort, by_length=by_length,
-                                                              by_alphabet=by_alphabet, by_create_time=by_create_time,
-                                                              reversed_=reversed_)
+            if is_sort:
+                sorted_node_groups = OrderByJoinResultMixin.sort_items(model_in_sort, output, int_sort=int_sort,
+                                                                       string_sort=string_sort, by_length=by_length,
+                                                                       by_alphabet=by_alphabet, by_create_time=by_create_time,
+                                                                       reversed_=reversed_)
+            else:
+                sorted_node_groups = output
             left_border, right_border = BaseSliceResultMixin.change_slice_value_on_items_length(output, left_border, right_border)
             return sorted_node_groups[left_border:right_border]
 
@@ -627,8 +624,9 @@ class Tool(ModelTools):
             return
         new_queue = Queue()
         for model_name, node_group in group_nodes_by_table_names(database_adapter.remaining_nodes).items():
-            [new_queue.append(ModelTools.import_model(model_name), **data)
-             for data in NodeDataManager.sync_node_data_many(model_name, node_group)]
+            model = ModelTools.import_model(model_name)
+            [new_queue.append(model, **data)
+             for data in NodeDataManager.sync_node_data_many(model, node_group)]
         cls.__set_cache(new_queue)
 
     @classmethod
@@ -652,60 +650,6 @@ class Tool(ModelTools):
                                          "чем интервал отправки объектов в базу данных.")
         cls._was_initialized = True
 
-    @staticmethod
-    def __is_valid_params__data_getter(left_border=0, right_border=float("inf"),
-                                       int_sort=False, string_sort=False,
-                                       by_length=False, by_alphabet=False, by_create_time=False,
-                                       reversed_=False, model_in_sort=None):
-        """ Валидация параметров для функций, берущих данные. Эти функции ищи внутри методов get_items, join_select. """
-        if type(left_border) is not int:
-            raise TypeError
-        if left_border < 0:
-            raise ValueError("Левая граница среза не может быть отрицательной")
-        if not isinstance(right_border, (float, int,)):
-            raise TypeError
-        if type(right_border) is float:
-            if not right_border == float("inf"):
-                raise ValueError("Правая граница среза может принадлежать к типу float, если ")
-        if not isinstance(int_sort, (bool, str)):
-            raise TypeError
-        if type(int_sort) is str:
-            if not int_sort:
-                raise ValueError("Не может быть пустой строки")
-        if type(int_sort) is bool:
-            if int_sort:
-                raise ValueError("Нужно передать строку-наименование столбца, "
-                                 "по которому будет производиться сортировка")
-        if not isinstance(string_sort, (bool, str,)):
-            raise TypeError
-        if type(string_sort) is str:
-            if not string_sort:
-                raise ValueError("Не может быть пустой строки")
-        if type(string_sort) is bool:
-            if string_sort:
-                raise ValueError("Нужно передать строку-наименование столбца, "
-                                 "по которому будет производиться сортировка")
-        if not type(by_create_time) is bool:
-            raise TypeError
-        if sum(map(lambda x: bool(x), (int_sort, string_sort, by_create_time,))) not in (0, 1,):
-            raise ValueError("Нужно использовать только один из этих вариантов: "
-                             "int_sort, string_sort, by_create_time")
-        if type(by_length) is not bool:
-            raise TypeError
-        if type(by_alphabet) is not bool:
-            raise TypeError
-        if not int_sort and not by_create_time and not string_sort:
-            return
-        if string_sort:
-            if not sum((by_length, by_alphabet,)) == 1:
-                raise ValueError
-        if type(reversed_) is not bool:
-            raise TypeError
-        if model_in_sort is None:
-            raise TypeError("Таблица, по которой происходит сортировка - необходима")
-        else:
-            ModelTools.is_valid_model_instance(model_in_sort)
-
     @classmethod
     def __set_cache(cls, nodes):
         if type(nodes) is not Queue:
@@ -728,43 +672,6 @@ class Tool(ModelTools):
         result = ServiceOrmContainer()
         [result.append(**{key: item.__dict__[key] for key in getattr(item.__class__, "column_names")}, _model=model, _insert=True) for item in items_db]
         return result
-
-    @staticmethod
-    def __sort_local_nodes(model, items: ServiceOrmContainer, int_sort: Union[bool, str] = False,
-                           string_sort: Union[bool, str] = False,
-                           by_length=False, by_alphabet=False, by_create_time=False,
-                           reversed_=False) -> ServiceOrmContainer:
-        sorted_nodes = None
-        if string_sort:
-            sorted_nodes = LetterSortSingleNodes(model, string_sort, items, reverse=reversed_)
-            if by_alphabet:
-                return sorted_nodes.sort_by_alphabet()
-            if by_length:
-                return sorted_nodes.sort_by_string_length()
-        if int_sort:
-            sorted_nodes = NumberSortSingleNodes(model, int_sort, items, reverse=reversed_)
-            return sorted_nodes.sort()
-        if by_create_time:
-            sorted_nodes = ...  # todo
-        return sorted_nodes
-
-    @staticmethod
-    def __sort_local_nodes_group(model,  items: Iterable[ServiceOrmContainer], int_sort: Union[bool, str] = False,
-                                 string_sort: Union[bool, str] = False,
-                                 by_length=False, by_alphabet=False, by_create_time=False,
-                                 reversed_=False):
-        sorted_nodes = None
-        if int_sort:
-            sorted_nodes = NumberSortNodesChain(model, int_sort, items, reverse=reversed_).sort()
-        if string_sort:
-            instance = LetterSortNodesChain(model, string_sort, items, reverse=reversed_)
-            if by_alphabet:
-                sorted_nodes = instance.sort_by_alphabet()
-            if by_length:
-                sorted_nodes = instance.sort_by_string_length()
-        if by_create_time:
-            ...  # todo
-        return sorted_nodes
 
 
 class SQLAlchemyQueryManager:

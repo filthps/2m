@@ -12,6 +12,7 @@ from two_m_root.tools import ModelTools
 from two_m_root.core import Tool
 from two_m_root.mixins import SliceResultMultiTypeDataMixin, SliceResultSingleTypeDataMixin, \
     OrderBySingleResultMixin, OrderByJoinResultMixin, ResultPaginator
+from two_m.main import ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT
 
 
 class ResultCacheTools(Tool):
@@ -105,7 +106,7 @@ class ResultCacheTools(Tool):
 
 class BaseResult(SliceResultSingleTypeDataMixin, SliceResultMultiTypeDataMixin, ResultCacheTools, AbstractResult, ABC):
     TEMP_HASH_PREFIX: str = ...
-    ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT = True  # Скрывать или не скрывать скрытые ноды из итерируемой последовательности
+    ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT = ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT
 
     def __init__(self, get_nodes_from_database=None, get_local_nodes=None,
                  only_local=False, only_database=False, **kwargs):
@@ -193,22 +194,22 @@ class BaseResult(SliceResultSingleTypeDataMixin, SliceResultMultiTypeDataMixin, 
     @property
     def items(self):
         merged_data = self._merge()
-        merged_data = self._sort_items(merged_data)
-        self.__merged_data = self._create_output(merged_data,
+        sorted_data = self._final_sort_items(merged_data)
+        self.__merged_data = self._create_output(sorted_data,
                                                  show_hidden_items=False if self.ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT else None)
         return self.__merged_data
 
     @property
     def visible_items(self):
         merged_data = self._merge()
-        sorted_data = self._sort_items(merged_data)
+        sorted_data = self._final_sort_items(merged_data)
         self.__merged_data = self._create_output(sorted_data, show_hidden_items=False)
         return self.__merged_data
 
     @property
     def hidden_items(self):
         merged_data = self._merge()
-        sorted_data = self._sort_items(merged_data)
+        sorted_data = self._final_sort_items(merged_data)
         self.__merged_data = self._create_output(sorted_data, show_hidden_items=True)
         return self.__merged_data
 
@@ -225,7 +226,7 @@ class BaseResult(SliceResultSingleTypeDataMixin, SliceResultMultiTypeDataMixin, 
 
     def __iter__(self):
         merged_data = self._merge()
-        merged_data = self._sort_items(merged_data)
+        merged_data = self._final_sort_items(merged_data)
         self.__merged_data = self._create_output(merged_data,
                                                  show_hidden_items=False if self.ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT else None)
         return self.__merged_data.__iter__()
@@ -255,29 +256,6 @@ class BaseResult(SliceResultSingleTypeDataMixin, SliceResultMultiTypeDataMixin, 
 
     def __str__(self):
         return f"{self.__class__.__name__}({self.items})"
-
-    def _sort_items(self, data, **kwargs):
-        """ Окончательная сортировка. После смешивания данных из базы данных и локальных данных """
-        if not self._is_sort:
-            return data
-        if hasattr(self, "_sort_items"):
-            return super()._sort_items(data, **kwargs)
-        return data
-
-    def _slice_items(self, data, **kwargs):
-        if hasattr(self, "_slice_items"):
-            return super()._slice_items(data, **kwargs)
-        return data
-
-    def _create_params_to_sort_items(self):
-        if hasattr(self, "_create_params_to_sort_items"):
-            return super()._create_params_to_sort_items()
-        return {}
-
-    def _get_slice_index(self, current_type):
-        if hasattr(self, "_get_slice_index"):
-            return super()._get_slice_index(current_type=current_type)
-        return 0, float("inf")
 
     @staticmethod
     def __gen_id(**kwargs):
@@ -313,8 +291,15 @@ class Result(OrderBySingleResultMixin, BaseResult, ResultPaginator, ModelTools):
         database_items = self.get_nodes_from_database()
         [output.enqueue(**node.get_attributes())
          for collection in (database_items, local_items,) for node in collection]
-        output = self._sort_items(output, **self._create_params_to_sort_items())
         return output
+
+    def _final_sort_items(self, merged_data):
+        """ Окончательная сортировка. После смешивания данных из базы данных и локальных данных """
+        if not self._is_sort:
+            return merged_data
+        if not issubclass(self.__class__, OrderBySingleResultMixin):
+            raise Exception
+        return self.sort_items(self._model, merged_data, **self._create_params_to_sort_items())
 
     @staticmethod
     def _create_output(data, show_hidden_items=None):
@@ -520,7 +505,6 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ResultPaginator, Mode
         result_data = merge(all_nodes_from_database, local_items)
         result_data = update_node_data(result_data)
         result_data = fix_local_fk_value(result_data)
-        result_data = self._sort_items(result_data, **self._create_params_to_sort_items())
         return result_data
 
     @staticmethod
@@ -533,8 +517,14 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ResultPaginator, Mode
             result.append(nodes) if nodes else None
         return tuple(result)
 
-    def _sort_items(self, data, **kwargs):
-        return super()._sort_items(tuple(data), **kwargs)
+    def _final_sort_items(self, merged_data):
+        """ Окончательная сортировка. После смешивания данных из базы данных и локальных данных """
+        if not self._is_sort:
+            return merged_data
+        if not issubclass(self.__class__, OrderByJoinResultMixin):
+            raise Exception
+        sort_params = self._create_params_to_sort_items()
+        return self.sort_items(self._model, tuple(merged_data), **sort_params)
 
     def __is_valid(self):
         if type(self.__on_items) is not dict:
