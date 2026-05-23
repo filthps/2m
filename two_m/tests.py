@@ -6,6 +6,7 @@ from sqlalchemy import text, select
 from sqlalchemy.orm.scoping import ScopedSession
 from procedures import init_all_triggers
 from two_m_root import core, result as res, sort, containers, nodes, tools
+from two_m_root.nodes import ResultORMItem
 from two_m_root.exceptions import *
 from models import *
 
@@ -1380,7 +1381,6 @@ class TestSliceMixin(unittest.TestCase, SetUp):
         self.assertRaises(ValueError, lambda: result_obj[5:1])
         self.assertRaises(TypeError, lambda: result_obj[float("inf"):])
 
-
     @drop_cache
     @db_reinit
     def test_slice_items_length(self):
@@ -1810,13 +1810,13 @@ class TestNumberSort(unittest.TestCase, SetUp):
 
     def test_sort_single_result_items_incr(self):
         instance = sort.NumberSortSingleNodes(Machine, "machineid", self.single_result_collection, reverse=False)
-        sorter_elems = instance.sort()
-        self.assertEqual([n["machineid"] for n in sorter_elems], [1, 2, 3, 4, 8, 419])
+        sorted_elems = instance.sort()
+        self.assertEqual([n["machineid"] for n in sorted_elems], [1, 2, 3, 4, 8, 419])
 
     def test_sort_single_result_items_decr(self):
         instance = sort.NumberSortSingleNodes(Machine, "machineid", self.single_result_collection, reverse=True)
-        sorter_elems = instance.sort()
-        self.assertEqual([n["machineid"] for n in sorter_elems], [419, 8, 4, 3, 2, 1])
+        sorted_elems = instance.sort()
+        self.assertEqual([n["machineid"] for n in sorted_elems], [419, 8, 4, 3, 2, 1])
 
     def test_sort_group_result_items_incr(self):
         instance = sort.NumberSortNodesChain(Machine, "machineid", self.joined_data, reverse=False)
@@ -1827,6 +1827,172 @@ class TestNumberSort(unittest.TestCase, SetUp):
         instance = sort.NumberSortNodesChain(Machine, "machineid", self.joined_data, reverse=True)
         elems = instance.sort()
         self.assertEqual([n["Machine"]["machineid"] for n in elems], [7, 6, 5, 4, 3, 2, 1])
+
+
+class TestByTimeSort(unittest.TestCase):
+    def setUp(self) -> None:
+        ResultORMItem.SHOW_HIDDEN_VALUES = True
+        data = [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.strptime("2013:03:12:5:45:11", "%Y:%m:%d:%H:%M:%S"),
+                 "machinename": "Test", "machineid": 1},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.strptime("2022:06:8:5:45:30", "%Y:%m:%d:%H:%M:%S"),
+                 "machinename": "Name", "machineid": 4},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.strptime("1967:12:12:5:45:00", "%Y:%m:%d:%H:%M:%S"),
+                 "machinename": "NewTest", "machineid": 2
+                 }, {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                  "_delete": False, "_create_at": datetime.datetime.strptime("2011:03:12:5:45:11", "%Y:%m:%d:%H:%M:%S"),
+                  "machinename": "Test4", "machineid": 3},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.strptime("1845:07:12:5:45:11", "%Y:%m:%d:%H:%M:%S"),
+                 "machinename": "Amacgdfg", "machineid": 8},
+                {"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+                 "_delete": False, "_create_at": datetime.datetime.strptime("2012:11:12:5:45:11", "%Y:%m:%d:%H:%M:%S"),
+                 "machinename": "ZName", "machineid": 419}]
+        self.single_result_collection = containers.ServiceOrmContainer(data)
+        pairs_data = [
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.strptime("2018:02:03:5:45:11", "%Y:%m:%d:%H:%M:%S"),
+              "machinename": "Some", "machineid": 5, "cncid": 5},
+             {"cncid": 5, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.now(), "name": "cndsf"}],
+            [{"_model": Machine, "_ready": True, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.strptime("2012:08:24:5:45:11", "%Y:%m:%d:%H:%M:%S"),
+              "machinename": "Som54he", "machineid": 6, "cncid": 6},
+             {"cncid": 6, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_update": True,
+              "_create_at": datetime.datetime.strptime("2025:03:12:5:45:11", "%Y:%m:%d:%H:%M:%S"), "name": "cncdsf"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.strptime("2009:06:28:5:45:11", "%Y:%m:%d:%H:%M:%S"),
+              "machinename": "Test12", "machineid": 2, "cncid": 2},
+             {"cncid": 2, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.strptime("2008:04:18:5:45:11", "%Y:%m:%d:%H:%M:%S"), "name": "dsff454g"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.strptime("2023:03:17:5:45:11", "%Y:%m:%d:%H:%M:%S"),
+              "machinename": "Test12345g", "machineid": 3, "cncid": 3},
+             {"cncid": 3, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_update": True,
+              "_create_at": datetime.datetime.strptime("2025:03:12:5:45:11", "%Y:%m:%d:%H:%M:%S"), "name": "cnc657"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.strptime("2011:03:12:5:45:11", "%Y:%m:%d:%H:%M:%S"),
+              "machinename": "SomeTest12", "machineid": 4, "cncid": 4},
+             {"cncid": 4, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.strptime("2005:03:08:5:45:11", "%Y:%m:%d:%H:%M:%S"), "name": "dsf"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.strptime("2026:03:12:5:45:11", "%Y:%m:%d:%H:%M:%S"),
+              "machinename": "Test", "machineid": 1, "cncid": 1},
+             {"cncid": 1, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.strptime("2005:09:13:5:45:09", "%Y:%m:%d:%H:%M:%S"), "name": "name"}],
+            [{"_model": Machine, "_ready": False, "_insert": False, "_update": True,
+              "_delete": False, "_create_at": datetime.datetime.strptime("2004:08:31:5:45:11", "%Y:%m:%d:%H:%M:%S"),
+              "machinename": "TestMachineName", "machineid": 7, "cncid": 7},
+             {"cncid": 7, "_model": Cnc, "commentsymbol": "%", "_ready": True, "_insert": True,
+              "_create_at": datetime.datetime.strptime("2016:07:03:5:45:11", "%Y:%m:%d:%H:%M:%S"), "name": "Aname"}]
+        ]
+        self.joined_data = []
+        for pair in pairs_data:
+            self.joined_data.append(containers.ServiceOrmContainer(pair))
+        self.joined_data = tuple(self.joined_data)
+
+    def test_init(self):
+        sort.TimeSortSingleNodes(Machine, self.single_result_collection)
+        sort.TimeSortNodesChain(Machine, self.joined_data)
+        with self.assertRaises((ValueError, TypeError, InvalidModel, AttributeError,)):
+            sort.TimeSortSingleNodes(3, self.single_result_collection)
+            sort.TimeSortSingleNodes(None, self.single_result_collection)
+            sort.TimeSortSingleNodes(self.single_result_collection, None)
+            sort.TimeSortSingleNodes("sdf", self.single_result_collection)
+            sort.TimeSortSingleNodes(Machine, tuple())
+            sort.TimeSortSingleNodes(Machine, {})
+            sort.TimeSortSingleNodes(Machine, None)
+            sort.TimeSortSingleNodes(Machine, "")
+            sort.TimeSortSingleNodes(Machine, self.joined_data)
+            sort.TimeSortSingleNodes()
+            sort.TimeSortSingleNodes(True)
+            sort.TimeSortSingleNodes([])
+            sort.TimeSortNodesChain(None, self.joined_data)
+            sort.TimeSortNodesChain("3", self.joined_data)
+            sort.TimeSortNodesChain("dfs", self.joined_data)
+            sort.TimeSortNodesChain(True, self.joined_data)
+            sort.TimeSortNodesChain(self.single_result_collection)
+            sort.TimeSortNodesChain()
+            sort.TimeSortNodesChain({}, self.single_result_collection)
+            sort.TimeSortNodesChain(Machine, True)
+            sort.TimeSortNodesChain(Machine, list())
+
+    def test_original_ordering(self):
+        """ Убедимся, что ноды расположены в исходном порядке,- в том, в котором они были переданы при инициализации.
+        Убедимся, что наш контейнер не перевирает очерёдность."""
+        time_single_nodes = [
+                "2013-03-12 05:45:11",
+                "2022-06-08 05:45:30",
+                "1967-12-12 05:45:00",
+                "2011-03-12 05:45:11",
+                "1845-07-12 05:45:11",
+                "2012-11-12 05:45:11"
+                ]
+        time_join_select_items = [
+            "2018-02-03 05:45:11",
+            "2012-08-24 05:45:11",
+            "2009-06-28 05:45:11",
+            "2023-03-17 05:45:11",
+            "2011-03-12 05:45:11",
+            "2026-03-12 05:45:11",
+            "2004-08-31 05:45:11",
+            ]
+        self.assertEqual([node.created_at.__str__() for node in self.single_result_collection], time_single_nodes)
+        self.assertEqual(time_join_select_items, list(map(lambda x: x.search_nodes(Machine)[0].created_at.__str__(),
+                                                          self.joined_data)))
+
+    def test_sort_single_result_items_incr(self):
+        time = ["1845-07-12 05:45:11",
+                "1967-12-12 05:45:00",
+                "2011-03-12 05:45:11",
+                "2012-11-12 05:45:11",
+                "2013-03-12 05:45:11",
+                "2022-06-08 05:45:30",
+                ]
+        instance = sort.TimeSortSingleNodes(Machine, self.single_result_collection, reverse=False)
+        sorted_elems = instance.sort()
+        self.assertTrue(all(map(lambda p: p[0] == p[1], zip([str(n.created_at) for n in sorted_elems], time))))
+
+    def test_sort_single_result_items_decr(self):
+        time = ["2022-06-08 05:45:30",
+                "2013-03-12 05:45:11",
+                "2012-11-12 05:45:11",
+                "2011-03-12 05:45:11",
+                "1967-12-12 05:45:00",
+                "1845-07-12 05:45:11"
+                ]
+        instance = sort.TimeSortSingleNodes(Machine, self.single_result_collection, reverse=True)
+        sorted_elems = instance.sort()
+        self.assertTrue(all(map(lambda p: p[0] == p[1], zip([str(n.created_at) for n in sorted_elems], time))))
+
+    def test_sort_group_result_items_incr(self):
+        time_machine_nodes = ["2004-08-31 05:45:11",
+                              "2009-06-28 05:45:11",
+                              "2011-03-12 05:45:11",
+                              "2012-08-24 05:45:11",
+                              "2018-02-03 05:45:11",
+                              "2023-03-17 05:45:11",
+                              "2026-03-12 05:45:11",
+                              ]
+        instance = sort.TimeSortNodesChain(Machine, self.joined_data)
+        sorted_items = instance.sort()
+        self.assertTrue(all([n[0] == str(n[1].search_nodes(Machine)[0].created_at) for n in zip(time_machine_nodes, sorted_items)]))
+
+    def test_sort_group_result_items_decr(self):
+        time_machine_nodes = ["2026-03-12 05:45:11",
+                              "2023-03-17 05:45:11", 
+                              "2018-02-03 05:45:11", 
+                              "2012-08-24 05:45:11",
+                              "2011-03-12 05:45:11", 
+                              "2009-06-28 05:45:11", 
+                              "2004-08-31 05:45:11"
+                              ]
+        print(time_machine_nodes)
+        instance = sort.TimeSortNodesChain(Machine, self.joined_data, reverse=True)
+        sorted_items = instance.sort()
+        self.assertTrue(all([n[0] == str(n[1].search_nodes(Machine)[0].created_at) for n in zip(time_machine_nodes, sorted_items)]))
 
 
 class TestSortSingleResultMixin(unittest.TestCase, SetUp):
