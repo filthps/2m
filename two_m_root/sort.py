@@ -1,9 +1,9 @@
 """
 Copyright (C) 2025 Литовченко Виктор Иванович (filthps)
+Python >= 3.7!
 """
 import string
 import datetime
-import operator
 from two_m_root.conf import CustomModel
 from two_m_root.tools import ModelTools
 from two_m_root.containers import ServiceOrmContainer
@@ -22,6 +22,8 @@ class BaseSort:
             raise TypeError
         self._reverse = reverse
         self._field = column_name
+        self._model = model
+        super().__init__(model, column_name, *args, reverse=reverse, **kw)
 
     def _create_mapping(self, nodes: "ServiceOrmContainer") -> dict:
         """
@@ -47,20 +49,25 @@ class BaseSortSingleNodes:
         self._nodes_in_sort = ServiceOrmContainer()  # Ноды, которые принимают участие в сортировке
         self._other_items = ServiceOrmContainer()  # Ноды, которые не участвуют в сортировке (доб в конец)
         self._field = column_name
-        super().__init__(model, column_name, nodes, *args, **kwargs)
+        self._model = model
 
     def _select_nodes_to_sort(self):
         """ Вернуть ноды, которые будут участвовать в сортировке """
         self._nodes_in_sort = ServiceOrmContainer()
         for node in self._input_nodes:
-            if self._field in node.value:
+            if not node.model.__name__ == self._model.__name__:
+                continue
+            if self._field in node.get_attributes():
                 self._nodes_in_sort.append(**node.get_attributes())
 
     def _slice_other_nodes(self):
         """ Вернуть ноды НЕ участвующие в сортировке """
         self._other_items = ServiceOrmContainer()
         for node in self._input_nodes:
-            if self._field not in node.value:
+            if not self._model.__name__ == node.model.__name__:
+                self._other_items.append(**node.get_attributes())
+                continue
+            if self._field not in node.get_attributes():
                 self._other_items.append(**node.get_attributes())
 
     @staticmethod
@@ -82,47 +89,59 @@ class BaseSortSingleNodes:
 
 
 class BaseSortJoinedNodes:
-    def __init__(self, model, column_name, items_group, **k):
+    def __init__(self, _, column_name, items_group, **k):
         self._is_valid_nodes_chain(items_group)
         self._nodes_chain = items_group
         self._field = column_name
-        super().__init__(model, column_name, items_group, **k)
 
     def _select_indexes(self, in_sort=True):
         """ Выбрать индексы коллекции, которые участвуют в сортировке или не участвуют """
         for n, collection in enumerate(self._nodes_chain):
             for node in collection:
                 if in_sort:
-                    if self._field in node.value:
-                        if node.value[self._field] is not None:
+                    if self._field in node.get_attributes():
+                        if node.get_attributes()[self._field] is not None:
                             yield n
                             continue
                         break
                     continue
-                if self._field not in node.value:
+                if self._field not in node.get_attributes():
                     break
-                if node.value[self._field] is not None:
+                if node.get_attributes()[self._field] is not None:
                     break
                 yield n
 
-    def _select_nodes(self, table_name, in_sort=True):
+    def _select_nodes(self, table_name=None, column_name=None, in_sort=True):
+        if table_name is None and column_name is None:
+            raise ValueError
         u = ServiceOrmContainer()
         for index in self._select_indexes(in_sort=in_sort):
             for node in self._nodes_chain[index]:
-                if node.model.__name__ == table_name:
-                    u.append(node_item=node)
+                if table_name is not None:
+                    if node.model.__name__ == table_name:
+                        if column_name is not None:
+                            if column_name in node.get_attributes():
+                                u.append(node_item=node)
+                        else:
+                            u.append(node_item=node)
+                else:
+                    if column_name in node.get_attributes():
+                        u.append(node_item=node)
         return u
 
     def _joined_nodes_hash_to_index_in_input_collection(self):
         return {self._nodes_chain[index].__hash__(): index for index in self._select_indexes()}
 
-    def _node_primary_key_hash_to_joined_nodes_hash(self):
+    def _node_primary_key_hash_to_joined_nodes_hash(self, model=None):
         d = {}
         for index in self._select_indexes():
             items_group = self._nodes_chain[index]
             for node in items_group:
-                if self._field in node.value:
-                    if node.value[self._field] is None:
+                if model is not None:
+                    if not model.__name__ == node.model.__name__:
+                        continue
+                if self._field in node.get_attributes():
+                    if node.get_attributes()[self._field] is None:
                         continue
                     d.update({node.hash_by_pk: hash(items_group)})
         return d
@@ -165,22 +184,7 @@ class BaseLetterSort(BaseSort):
             data[(p.upper(), p.lower(),)].append(**item.get_attributes())
 
 
-class BaseTimeSort(BaseSort):
-    DEFAULT_CREATE_TIME_COLUMN_NAME = "_create_at"
-
-    def __init__(self, model, *args, **kwargs):
-        super().__init__(model, *args, **kwargs)
-        self._field = self.DEFAULT_CREATE_TIME_COLUMN_NAME
-        self.__check_create_time_column(model)
-
-    @classmethod
-    def __check_create_time_column(cls, model):
-        ModelTools.is_exists_column(model, cls.DEFAULT_CREATE_TIME_COLUMN_NAME)
-        if not ModelTools.get_column_python_type(model, cls.DEFAULT_CREATE_TIME_COLUMN_NAME) is datetime:
-            raise TypeError
-
-
-class LetterSortSingleNodes(BaseSortSingleNodes, BaseLetterSort):
+class LetterSortSingleNodes(BaseLetterSort, BaseSortSingleNodes):
     def sort_by_alphabet(self):
         """ Инициализировать словарь,
         в котором ключами выступит первая буква из значения нашего ключевого слова, а значениями - очередь с нодой или нодами,
@@ -213,26 +217,18 @@ class LetterSortSingleNodes(BaseSortSingleNodes, BaseLetterSort):
         return output + self._other_items
 
 
-class LetterSortNodesChain(BaseSortJoinedNodes, BaseLetterSort):
+class LetterSortNodesChain(BaseLetterSort, BaseSortJoinedNodes):
     def sort_by_alphabet(self):
         """
         1) Выделить все участвующие в сортировке ноды в отдельный контейнер
-        2) В словарь, с упорядоченными по алфавиту ключами, разложить в соответствии с первой буквой
-        3) Создать словарь вида {хеш-ноды: хеш-исходной-группы-нод}
-        4) Создать словарь вида {хеш-исходной-группы-нод: индекс-в-исходном-списке}
-        5) Обойти словарь по values, обойти каждый контейнер по нодам,
+        2) Создать словарь, где в качестве ключей выступают кортежи с буквами, расположенные в словаре упорядоченно,
+        согласно алфавиту, а значениями - группы нод
+        3) Создать словарь вида {хеш_ноды_участвующей_в_сортировке: хеш_исходной_группы_нод}
+        4) Создать словарь вида {хеш_исходной_группы_нод: индекс_в_исходном_списке}
+        5) Обойти отсортированный словарь по values, обойти каждый контейнер по нодам,
         брать хеш ноды, извлекать хеш контейнера по словарю из п.3. Извлекать исходный индекс по словарю из п.4
         6) Обойти полученные в п.5 индексы, собрав элементы из исходного списка в результирующий список, вернуть.
         """
-        def add_all_nodes_in_one_container():
-            c = ServiceOrmContainer()
-            for index in self._select_indexes():
-                items_group = self._nodes_chain[index]
-                for node in items_group:
-                    if self._field in node.value:
-                        c.append(**node.get_attributes())
-            return c
-
         def fill_result(mapping):
             for group_by_letter in mapping.values():
                 for node in group_by_letter:
@@ -241,7 +237,7 @@ class LetterSortNodesChain(BaseSortJoinedNodes, BaseLetterSort):
                     yield self._nodes_chain[index_in_input]
 
         mapping = self._create_mapping()
-        joined_nodes = add_all_nodes_in_one_container()
+        joined_nodes = self._select_nodes(table_name=self._model.__name__, column_name=self._field)
         self._fill_mapping(mapping, joined_nodes, self._field)
         hash_item_to_group_mapping = self._node_primary_key_hash_to_joined_nodes_hash()
         group_nodes_to_index_mapping = self._joined_nodes_hash_to_index_in_input_collection()
@@ -277,7 +273,7 @@ class BaseNumberSort(BaseSort):
                             "не является корректным для соритровки данного типа. Ожидался тип - int.")
 
 
-class NumberSortSingleNodes(BaseSortSingleNodes, BaseNumberSort):
+class NumberSortSingleNodes(BaseNumberSort, BaseSortSingleNodes):
     def __init__(self, model: CustomModel, column_name: str, nodes: "ResultORMCollection", reverse=False):
         super().__init__(model, column_name, nodes, reverse=reverse)
 
@@ -291,7 +287,7 @@ class NumberSortSingleNodes(BaseSortSingleNodes, BaseNumberSort):
         return output + self._other_items
 
 
-class NumberSortNodesChain(BaseSortJoinedNodes, BaseNumberSort):
+class NumberSortNodesChain(BaseNumberSort, BaseSortJoinedNodes):
     def __init__(self, model: CustomModel, field_name: str, nodes_group: tuple["ServiceOrmContainer"], reverse=False):
         self._is_valid_nodes_chain(nodes_group)
         if ModelTools.get_column_python_type(model, field_name) is not int:
@@ -315,7 +311,33 @@ class NumberSortNodesChain(BaseSortJoinedNodes, BaseNumberSort):
         return output
 
 
-class TimeSortSingleNodes(BaseSortSingleNodes, BaseTimeSort):
+class BaseTimeSort(BaseSort):
+    DEFAULT_CREATE_TIME_COLUMN_NAME = "_create_at"
+
+    def __init__(self, model, *args, **kwargs):
+        self._field = self.DEFAULT_CREATE_TIME_COLUMN_NAME
+        self.__check_create_time_column(model)
+        super().__init__(model, self.DEFAULT_CREATE_TIME_COLUMN_NAME, *args, **kwargs)
+
+    def _create_mapping(self, nodes: "ServiceOrmContainer") -> dict:
+        out = {}
+        for node in nodes:
+            k = ServiceOrmContainer()
+            out.update({node.get_attributes()[self._field]: k})
+            k.append(node_item=node)
+        return out
+
+    @classmethod
+    def __check_create_time_column(cls, model):
+        if not ModelTools.is_exists_column(model, cls.DEFAULT_CREATE_TIME_COLUMN_NAME):
+            raise ValueError
+        if not ModelTools.get_column_python_type(model, cls.DEFAULT_CREATE_TIME_COLUMN_NAME) is datetime.datetime:
+            raise TypeError
+
+
+class TimeSortSingleNodes(BaseTimeSort, BaseSortSingleNodes):
+    """ Сортировка нод в контейнере по скрытому столбцу '_created_at'.
+        Сортировка происходит в словаре, где в роли ключей выступает объект datetime. """
     def sort(self):
         self._select_nodes_to_sort()
         self._slice_other_nodes()
@@ -325,9 +347,27 @@ class TimeSortSingleNodes(BaseSortSingleNodes, BaseTimeSort):
         return result + self._other_items
 
 
-class TimeSortNodesChain(BaseSortJoinedNodes):
-    def __sort_nodes_by_create_time(self):
-        def nodes_map():
-            for nodes_group in self:
-                yield min(map(lambda node: node.created_at, nodes_group)), nodes_group
-        return list(dict(sorted(nodes_map(), key=operator.itemgetter(0))).values())
+class TimeSortNodesChain(BaseTimeSort, BaseSortJoinedNodes):
+    """
+    1) Выделить все участвующие в сортировке ноды в отдельный контейнер
+    2) Создать словарь, где в качестве ключей выступают объекты datetime, а значениями - группы нод
+    3) сортировать словарь
+    4) Создать словарь вида {хеш_ноды_участвующей_в_сортировке: хеш_исходной_группы_нод}
+    5) Создать словарь вида {хеш_исходной_группы_нод: индекс_в_исходном_списке}
+    6) Обойти отсортированный словарь по values, обойти каждый контейнер по нодам,
+    брать хеш ноды, извлекать хеш контейнера по словарю из п.4. Извлекать исходный индекс по словарю из п.5
+    7) Обойти полученные в п.6 индексы, собрав элементы из исходного списка в результирующий список, вернуть.
+    """
+    def sort(self):
+        joined_nodes = self._select_nodes(self._model.__name__, self._field, in_sort=True)
+        mapping = self._create_mapping(joined_nodes)
+        mapping = self._fill_mapping(mapping)
+        hash_item_to_group_mapping = self._node_primary_key_hash_to_joined_nodes_hash()
+        group_nodes_to_index_mapping = self._joined_nodes_hash_to_index_in_input_collection()
+        output = []
+        for node in mapping.values():
+            nodes_group_hash = hash_item_to_group_mapping[node.hash_by_pk]
+            index_in_input_collection = group_nodes_to_index_mapping[nodes_group_hash]
+            output.append(self._nodes_chain[index_in_input_collection])
+        output.extend([self._nodes_chain[index] for index in self._select_indexes(in_sort=False)])
+        return output
