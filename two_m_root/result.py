@@ -118,12 +118,12 @@ class BaseResult(SliceResultSingleTypeDataMixin, SliceResultMultiTypeDataMixin, 
         self._pointer: Optional["Pointer"] = None
         self._is_slice = False
         self._is_sort = False
-        self.__merged_data: Union[list[ResultORMCollection], ResultORMCollection] = []
         self.__is_valid()
         super().__init__(self._id, only_local=only_local, only_database=only_database,
                          get_local_nodes=get_local_nodes, get_nodes_from_database=get_nodes_from_database, **kwargs)
-        self._set_hash(self.items)
-        self._set_primary_keys(self.__merged_data)
+        merged_data = self.items
+        self._set_hash(merged_data)
+        self._set_primary_keys(merged_data)
 
     def get_nodes_from_database(self, **kwargs):
         if self._only_queue:
@@ -195,23 +195,20 @@ class BaseResult(SliceResultSingleTypeDataMixin, SliceResultMultiTypeDataMixin, 
     def items(self):
         merged_data = self._merge()
         sorted_data = self._final_sort_items(merged_data)
-        self.__merged_data = self._create_output(sorted_data,
-                                                 show_hidden_items=False if self.ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT else None)
-        return self.__merged_data
+        return self._create_output(sorted_data,
+                                   show_hidden_items=False if self.ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT else None)
 
     @property
     def visible_items(self):
         merged_data = self._merge()
         sorted_data = self._final_sort_items(merged_data)
-        self.__merged_data = self._create_output(sorted_data, show_hidden_items=False)
-        return self.__merged_data
+        return self._create_output(sorted_data, show_hidden_items=False)
 
     @property
     def hidden_items(self):
         merged_data = self._merge()
         sorted_data = self._final_sort_items(merged_data)
-        self.__merged_data = self._create_output(sorted_data, show_hidden_items=True)
-        return self.__merged_data
+        return self._create_output(sorted_data, show_hidden_items=True)
 
     @property
     def pointer(self):
@@ -227,9 +224,9 @@ class BaseResult(SliceResultSingleTypeDataMixin, SliceResultMultiTypeDataMixin, 
     def __iter__(self):
         merged_data = self._merge()
         merged_data = self._final_sort_items(merged_data)
-        self.__merged_data = self._create_output(merged_data,
-                                                 show_hidden_items=False if self.ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT else None)
-        return self.__merged_data.__iter__()
+        result = self._create_output(merged_data,
+                                     show_hidden_items=False if self.ITER_ONLY_VISIBLE_ITEMS_AS_DEFAULT else None)
+        return result.__iter__()
 
     def __len__(self):
         return sum((1 for _ in self))
@@ -302,7 +299,7 @@ class Result(OrderBySingleResultMixin, BaseResult, ResultPaginator, ModelTools):
         return self.sort_items(self._model, merged_data, **self._create_params_to_sort_items())
 
     @staticmethod
-    def _create_output(data, show_hidden_items=None):
+    def _create_output(data, show_hidden_items=False):
         """ Упаковать результат,
         готовый для использования конечным пользователем,
         в специальный защищённый контейнер """
@@ -339,7 +336,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ResultPaginator, Mode
         self.__is_valid()
         super().__init__(*args, models=models, **kwargs)
 
-    def __getitem__(self, item: Union[slice, int]) -> ResultORMCollection:
+    def __getitem__(self, item: Union[slice, int]):
         if type(item) is not int:
             return super().__getitem__(item)
         data = self.items
@@ -365,8 +362,8 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ResultPaginator, Mode
             return hash(item) in map(hash, self)
         return False
 
-    def _merge(self) -> tuple[ServiceOrmContainer]:
-        def check_input_items(items: list[ServiceOrmContainer]):
+    def _merge(self):
+        def check_input_items(items):
             """ Тестировать входящие результаты на соответствие. """
             if not isinstance(items, list):
                 raise TypeError
@@ -398,8 +395,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ResultPaginator, Mode
                     len(set([n for group in all_nodes_per_group_counter for n in group])):
                 raise ValueError("В нескольких коллекциях присутствует одна и так же нода")
 
-        def filter_relationship_preliminarily(db: list["ServiceOrmContainer"],
-                                              local: list["ServiceOrmContainer"]):
+        def filter_relationship_preliminarily(db, local):
             """ Предварительная фильтрация.
             Удалить из обеих выборок (local и БД) ноды, в которых поля отношений содержат null.
             Если в данной группе (PK'node - FK'node - ...) осталась только одна нода,
@@ -415,8 +411,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ResultPaginator, Mode
                             if len(nodes_group) == 1:
                                 del all_items_by_current_type[i]
 
-        def filter_relationship_final(db: list["ServiceOrmContainer"],
-                                      local: list["ServiceOrmContainer"]):
+        def filter_relationship_final(db, local):
             for local_node_group in local:
                 for pk_data, fk_data in self.__on_items.items():
                     pk_model_name, _ = pk_data
@@ -431,7 +426,7 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ResultPaginator, Mode
                             fk_node_db = db_node_group[fk_model_name]
                             if fk_node_db is None:
                                 break
-                            if not fk_node_db == pk_node:
+                            if not fk_node_db == fk_node:
                                 db_node_group.remove(fk_node_db.model, *fk_node_db.get_primary_key_and_value(as_tuple=True))
                                 fk_node_was_removed = True
                         if fk_node_was_removed and len(db_node_group) == 1:
@@ -483,12 +478,11 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ResultPaginator, Mode
                 for merged_node in group:
                     find_merged_node_in_local_nodes = False
                     for node in all_nodes:
-                        if node.model.__name__ == merged_node.model.__name__:
-                            if merged_node.get_primary_key_and_value() == node.get_primary_key_and_value():
-                                data = merged_node.value
-                                data.update(node.value)
-                                c.append(_model=node.model, **data)
-                                find_merged_node_in_local_nodes = True
+                        if merged_node == node:
+                            data = merged_node.get_attributes()
+                            data.update(node.value)
+                            c.append(**data)
+                            find_merged_node_in_local_nodes = True
                     if not find_merged_node_in_local_nodes:
                         c.append(node_item=merged_node)
                 yield c
@@ -503,14 +497,12 @@ class JoinSelectResult(OrderByJoinResultMixin, BaseResult, ResultPaginator, Mode
         filter_relationship_preliminarily(all_nodes_from_database, local_items)
         filter_relationship_final(all_nodes_from_database, local_items)
         result_data = merge(all_nodes_from_database, local_items)
-        result_data = update_node_data(result_data)
         result_data = fix_local_fk_value(result_data)
+        result_data = update_node_data(result_data)
         return result_data
 
     @staticmethod
-    def _create_output(data, show_hidden_items=None) -> tuple[ResultORMCollection]:
-        if show_hidden_items is None:
-            return tuple(ResultORMCollection(item) for item in data)
+    def _create_output(data, show_hidden_items=False) -> tuple[ResultORMCollection]:
         result = []
         for item in data:
             nodes = ResultORMCollection(item, show_hidden_nodes=show_hidden_items)

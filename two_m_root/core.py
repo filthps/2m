@@ -161,7 +161,7 @@ class Tool(ModelTools):
         def select_from_db(left_border=0, right_border=float("inf"),
                            int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                            by_length=False, by_alphabet=False, by_create_time=False,
-                           reversed_=False):
+                           reversed_=False, **kwargs):
             if left_border == right_border:
                 return ServiceOrmContainer()
             try:
@@ -199,7 +199,7 @@ class Tool(ModelTools):
         def select_from_cache(left_border=0, right_border=float("inf"),
                               int_sort: Union[bool, str] = False, string_sort: Union[bool, str] = False,
                               by_length=False, by_alphabet=False, by_create_time=False,
-                              reversed_=False):
+                              reversed_=False, **k):
             if left_border == right_border:
                 return ServiceOrmContainer()
             nodes = cls.connection.items.search_nodes(model, output_type=ServiceOrmContainer, **attrs)
@@ -358,6 +358,8 @@ class Tool(ModelTools):
                         if current_node_data:
                             row.append(_model=model, _insert=True, **current_node_data)  # O(l)
                     yield row
+            if left_border == right_border:
+                return tuple()
             sql_text = create_request()
             query: CursorResult = eval(sql_text, {
                 "db": cls.connection.database,
@@ -413,6 +415,8 @@ class Tool(ModelTools):
                                     raw.append(**right_node.get_attributes())
                         if raw:
                             yield raw
+            if left_border == right_border:
+                return tuple()
             output = tuple(compare_by_matched_fk())
             if is_sort:
                 sorted_node_groups = OrderByJoinResultMixin.sort_items(model_in_sort, output, int_sort=int_sort,
@@ -621,6 +625,7 @@ class Tool(ModelTools):
         database_adapter = SQLAlchemyQueryManager(cls.connection.items)
         database_adapter.start()
         if not database_adapter.remaining_nodes:
+            cls.__remove_cache()
             return
         new_queue = Queue()
         for model_name, node_group in group_nodes_by_table_names(database_adapter.remaining_nodes).items():
@@ -634,7 +639,7 @@ class Tool(ModelTools):
         if cls._timer:
             cls._timer.cancel()
         timer = threading.Timer(cls.RELEASE_INTERVAL_SECONDS, cls.release)
-        timer.daemon = False
+        timer.daemon = True
         timer.setName("Tool(database push queue)")
         timer.start()
         return timer
@@ -655,6 +660,10 @@ class Tool(ModelTools):
         if type(nodes) is not Queue:
             raise TypeError
         cls.connection.cache.set("ORMItems", nodes, cls.CACHE_LIFETIME_HOURS)
+
+    @classmethod
+    def __remove_cache(cls):
+        cls.connection.cache.remove("ORMItems")
 
     @staticmethod
     def __detect_primary_key(model, value: dict):

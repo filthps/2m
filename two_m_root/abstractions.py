@@ -149,7 +149,7 @@ class AbstractResult:
 
     @staticmethod
     @abstractmethod
-    def _create_output(data: Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"], show_hidden_items: Optional[bool] = None) -> Union[tuple["ResultORMCollection"], "ResultORMCollection"]:
+    def _create_output(data: Union[tuple["ServiceOrmContainer"], "ServiceOrmContainer"], show_hidden_items=False) -> Union[tuple["ResultORMCollection"], "ResultORMCollection"]:
         """ Сформировать результирующую последовательность соответственного типа,
         доступную для использования конечным пользователем.
         Отфильтровать ноды или коллекции нод, если в них присутствуют скрытые ноды.

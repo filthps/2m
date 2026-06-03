@@ -12,7 +12,8 @@ from two_m_root.containers import ServiceOrmContainer, ResultORMCollection
 from two_m_root.nodes import QueueItem
 from two_m_root.sort import LetterSortSingleNodes, LetterSortNodesChain, NumberSortSingleNodes, NumberSortNodesChain, \
     TimeSortSingleNodes, TimeSortNodesChain
-from two_m.main import ITEMS_ON_PAGE, BY_PRIMARY_KEY, BY_COLUMN_NAME, BY_CREATE_TIME, BY_ALPHABET, BY_STRING_LENGTH, REVERSED
+from two_m.main import ITEMS_ON_PAGE, BY_PRIMARY_KEY, BY_COLUMN_NAME, BY_CREATE_TIME, BY_ALPHABET, BY_STRING_LENGTH, \
+    REVERSED, UNIFORM_SAMPLING_DB_AND_CACHE
 
 
 class OrderByMixin(AbstractResultMixin):
@@ -212,7 +213,7 @@ class OrderBySingleResultMixin(OrderByMixin):
     def sort_items(cls, model, items: ServiceOrmContainer,  int_sort: Union[bool, str] = False,
                    string_sort: Union[bool, str] = False,
                    by_length=False, by_alphabet=False, by_create_time=False,
-                   reversed_=False):
+                   reversed_=False, **kwargs):
         ModelTools.is_valid_model_instance(model)
         if type(items) is not ServiceOrmContainer:
             raise TypeError
@@ -231,7 +232,8 @@ class OrderBySingleResultMixin(OrderByMixin):
             return sorted_nodes.sort()
         if by_create_time:
             sorted_nodes = TimeSortSingleNodes(model, items)
-        return sorted_nodes.sort()
+            sorted_nodes.sort()
+        return sorted_nodes
 
 
 class OrderByJoinResultMixin(OrderByMixin, ModelTools):
@@ -265,7 +267,7 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
         if not hasattr(items, "__iter__") or not hasattr(items, "__getitem__"):
             raise TypeError
         if not items:
-            return
+            return tuple()
         if type(items[0]) is not ServiceOrmContainer:
             raise TypeError
         cls._is_valid_sort_params(model_in_sort=model, int_sort=int_sort, string_sort=string_sort, 
@@ -305,7 +307,7 @@ class OrderByJoinResultMixin(OrderByMixin, ModelTools):
 
 class BaseSliceResultMixin:
     """ Функционал для контроля численности выборки в виде реализации среза. Мемоизация параметров среза."""
-    UNIFORM_SAMPLING_DB_AND_CACHE = False  # Производить выборку данных из кеша и базы данных равномерно - половина на половину
+    UNIFORM_SAMPLING_DB_AND_CACHE = UNIFORM_SAMPLING_DB_AND_CACHE  # Производить выборку данных из кеша и базы данных равномерно - половина на половину
     # Или сначала в результат пойдёт одна из категорий до исчерпания, а потом вторая
     # Внимание. Если данный режим включён, то минимальное количество элементов в срезе может сильно разниться,
     # и не будет соответствовать ожидаемой длине!
@@ -331,7 +333,7 @@ class BaseSliceResultMixin:
         items_length = len(items)
         return left, right if items_length > right else items_length
 
-    def __getitem__(self, item: slice):
+    def __getitem__(self, item: slice) -> None:
         """ Срез начинается с 1, правая граница не входит, шаг всегда 1 """
         if type(item) is not slice:
             raise TypeError
@@ -539,18 +541,22 @@ class SliceResultSingleTypeDataMixin(BaseSliceResultMixin, AbstractSliceMixin, A
             return self._get_nodes_from_database(*args, left_border=left, right_border=right, **kwargs)
 
     def _get_slice_index(self, current_type):
+        if current_type not in ("local", "db"):
+            raise ValueError
         if not self._is_slice:
             return self._left_border, self._right_border
         if self._only_local or self._only_db:
             return self._left_border, self._right_border
-        if self._current_call_counter == 1:
-            if self.FIRST_ITEMS_TYPE == current_type:
-                return self._left_border, self._right_border
+        if current_type == "local":
+            if self._current_call_counter == 1:
+                if self.FIRST_ITEMS_TYPE == current_type:
+                    return self._left_border, self._right_border
             return 0, 0
-        if self._current_call_counter == 2:
-            if not self.FIRST_ITEMS_TYPE == current_type:
-                return self._left_border, self._right_border
-            return 0, 0
+        if current_type == "db":
+            if self._current_call_counter == 1:
+                if self.FIRST_ITEMS_TYPE == current_type:
+                    return self._left_border, self._right_border
+        return 0, 0
 
 
 class ResultPaginator:
@@ -583,8 +589,8 @@ class ResultPaginator:
             left_border = 1
             right_border = float("inf")
         else:
-            left_border = page_num * self.__items_on_page if page_num > 1 else 1
-            right_border = left_border + self.__items_on_page
+            right_border = page_num * self.__items_on_page if page_num > 1 else self.__items_on_page + 1
+            left_border = right_border - self.__items_on_page if not page_num == 1 else 1
         self[left_border:right_border]  # use slice mixin
         self.__page = page_num if self else self.__page
 
@@ -621,4 +627,4 @@ class ResultPaginator:
         if not isinstance(current_page, int):
             raise TypeError
         if current_page <= 0:
-            raise ValueError
+            raise IndexError
