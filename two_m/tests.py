@@ -820,8 +820,6 @@ class TestToolHelper(unittest.TestCase, SetUp):
         self.orm_manager.set_item(_model=Machine, machineid=1, cncid=9, _update=True)
         self.assertFalse(any(filter(lambda x: not len(x) == 2, result)))
         self.assertEqual(4, result.__len__())
-        u = result.items[0]["Cnc"]
-        print(u)
         self.assertEqual(result.items[0]["Cnc"]["cncid"], 1, result.items[0]["Machine"]["cncid"])
         self.assertEqual(result.items[0]["Cnc"]["name"], "Newcnc")
         self.assertEqual(result.items[0]["Machine"]["machinename"], "Tesm")
@@ -883,14 +881,13 @@ class TestToolHelper(unittest.TestCase, SetUp):
         #
         # Comment - OperationDelegation
         #
-        result = self.orm_manager.join_select(Comment, OperationDelegation, _on={"Comment.commentid": "OperationDelegation.commentid"},
+        result = self.orm_manager.join_select(OperationDelegation, Comment, _on={"Comment.commentid": "OperationDelegation.commentid"},
                                               _use_join=True)
         self.assertEqual("test_string_set_from_queue", result.items[1]["Comment"]["findstr"])
         self.assertNotEqual("test_string_set_from_queue", result.items[0]["Comment"]["findstr"])
         self.assertEqual("test_str", result.items[0]["Comment"]["findstr"])
-        self.assertNotEqual("test_str", result.items[1]["Comment"]["findstr"])
+        self.assertEqual("test_string_set_from_queue", result.items[1]["Comment"]["findstr"])
         self.assertEqual(result.items[0]["Comment"]["iffullmatch"], True)
-        self.assertNotIn("iffullmatch", result.items[1]["Comment"])
         self.assertEqual(True, result.items[1]["Comment"]["ifcontains"])
         self.assertFalse(result.items[0]["Comment"]["ifcontains"])
         #
@@ -991,6 +988,22 @@ class TestToolHelper(unittest.TestCase, SetUp):
         # Возвращает ли метод экземпляр класса res.JoinSelectResult?
         self.assertIsInstance(self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _use_join=False),
                               res.JoinSelectResult)
+        # Отбор только из локальных данных (очереди), но в базе данных их пока что быть не должно
+        #
+        # Machine - Cnc
+        #
+        local_data = self.orm_manager.join_select(Machine, Cnc, _on={"Cnc.cncid": "Machine.cncid"}, _queue_only=True, _use_join=False)
+        database_data = self.orm_manager.join_select(Cnc, Machine, _on={"Cnc.cncid": "Machine.cncid"}, _db_only=True, _use_join=False)
+        local_data.order_by(by_primary_key=True, model=Machine)
+        database_data.order_by(by_primary_key=True, model=Machine)
+        self.assertEqual(local_data.items[0]["Machine"]["cncid"], local_data.items[0]["Cnc"]["cncid"])
+        self.assertEqual(database_data.items[0]["Cnc"]["cncid"], database_data.items[0]["Machine"]["cncid"])
+        self.assertIn("machineid", local_data.items[0]["Machine"])
+        self.assertIn("machineid", database_data.items[0]["Machine"])
+        self.assertNotEqual(local_data.items[0]["Machine"]["machinename"], database_data.items[0]["Machine"]["machinename"])
+        self.assertEqual("Fidia", local_data.items[1]["Machine"]["machinename"])
+        self.assertEqual("Newcnc", local_data.items[0]["Cnc"]["name"])
+        self.assertNotEqual(local_data.items[0]["Cnc"]["name"], database_data.items[0]["Cnc"]["name"])
         # GOOD (хороший случай)
         # Найдутся ли записи с pk равными значениям, которые мы добавили
         # Machine - Cnc
@@ -1413,12 +1426,17 @@ class TestSliceMixin(unittest.TestCase, SetUp):
     def test_slice_items_with_order(self):
         self.set_data_into_database()
         self.set_data_into_queue()
+        local_data = self.orm_manager.get_items(Machine, _queue_only=True)
+        local_data.order_by(by_primary_key=True, decr=True)
+        print(local_data.items.__len__())
         result_obj = self.orm_manager.get_items(_model=Machine)
         result_obj.order_by(by_primary_key=True, decr=True)
         self.assertEqual([12, 7, 4, 3, 2, 1], [n.get_primary_key_and_value(only_value=True) for n in result_obj])
-        result_obj[1:5]
-        self.assertEqual([12, 7, 4, 3], [n.get_primary_key_and_value(only_value=True) for n in result_obj])
-        result_obj.order_by(by_primary_key=True, decr=False)
+        result_obj.UNIFORM_SAMPLING_DB_AND_CACHE = False
+        result_obj[1:3]
+        self.assertEqual([12, 7], [n.get_primary_key_and_value(only_value=True) for n in result_obj])
+        result_obj.UNIFORM_SAMPLING_DB_AND_CACHE = True
+        print(result_obj.items)
 
 
 class LetterSort(unittest.TestCase):
@@ -2103,22 +2121,83 @@ class TestResultPaginator(unittest.TestCase, SetUp):
         self.orm_manager.set_item(_model=Machine, machinename="new_machine_16", _insert=True)
         self.orm_manager.set_item(_model=Machine, machinename="new_machine_17", _insert=True)
         self.orm_manager.set_item(_model=Machine, machinename="new_machine_18", _insert=True)
+        self.orm_manager.set_item(Cnc, _insert=True, name="test111", cncid=6)
+        self.orm_manager.set_item(Machine,  machinename="new_machine_2", cncid=6, _update=True)
+        self.orm_manager.set_item(Cnc, cncid=7, name="test112", _insert=True)
+        self.orm_manager.set_item(Machine, machinename="new_machine_5", _update=True, cncid=7)
+        self.orm_manager.set_item(Cnc, cncid=8, name="test113", _insert=True)
+        self.orm_manager.set_item(Machine, machinename="new_machine_6", _update=True, cncid=8)
+        self.orm_manager.set_item(Cnc, cncid=9, name="test114", _insert=True)
+        self.orm_manager.set_item(Machine, machinename="new_machine_7", _update=True, cncid=9)
 
     def test_single_result_items(self):
         result_obj = self.orm_manager.get_items(Machine)
         result_obj.order_by(by_primary_key=True)
         result_obj.ROUNDING_POLICY = "-"
         result_obj.RESIDUAL_ITEM = "none"
-        self.assertEqual(result_obj.ITEMS_ON_PAGE, float("inf"))  # Пагинатор выключен
-        self.assertEqual(25, len(result_obj))  # Пагинатор выключен
+        print(len(result_obj))  # 25
+        self.assertEqual(result_obj.ITEMS_ON_PAGE, 25)  # Пагинатор выключен, дефолтное максимальное количество смотри в модуле
+        # main, контанта ITEMS_ON_PAGE
+        self.assertEqual(25, len(result_obj))  # Пагинатор выключен, всего элементов
         result_obj.paginate(items_on_page=5)
+        self.assertEqual(result_obj.__len__(), 5)
         self.assertEqual(result_obj.page, 1)
         self.assertEqual(result_obj.__len__(), 5)
-        print(result_obj)
-        result_obj.next_page
-        print(result_obj)
-        result_obj.next_page
-        print(result_obj)
+        elems_from_page_1_pk_hash = result_obj.items.hash_by_pk
+        result_obj.page = 3
+        self.assertEqual(result_obj.__len__(), 5)
+        self.assertEqual(3, result_obj.page)
+        elems_from_page_3_hash_by_pk = result_obj.items.hash_by_pk
+        self.assertNotEqual(elems_from_page_1_pk_hash, elems_from_page_3_hash_by_pk)
+        _ = result_obj.next_page  # 4
+        self.assertEqual(4, result_obj.page)
+        self.assertEqual(result_obj.__len__(), 5)
+        elems_from_page_4_hash_by_pk = result_obj.items.hash_by_pk
+        self.assertNotEqual(elems_from_page_4_hash_by_pk, elems_from_page_1_pk_hash)
+        self.assertNotEqual(elems_from_page_3_hash_by_pk, elems_from_page_4_hash_by_pk)
+        _ = result_obj.next_page
+        self.assertEqual(5, result_obj.page)
+        elems_from_page_5_hash_by_pk = result_obj.items.hash_by_pk
+        self.assertNotEqual(elems_from_page_4_hash_by_pk, elems_from_page_5_hash_by_pk)
+        self.assertNotEqual(elems_from_page_3_hash_by_pk, elems_from_page_5_hash_by_pk)
+        self.assertNotEqual(elems_from_page_1_pk_hash, elems_from_page_5_hash_by_pk)
+        with self.assertRaises(IndexError):
+            _ = result_obj.next_page
+            result_obj.page = 6
+            result_obj.page = 100
+            result_obj.page = 0
+            result_obj.page = -2
+        with self.assertRaises(TypeError):
+            result_obj.page = "-1"
+            result_obj.page = None
+            result_obj.page = [2]
+            result_obj.page = 6.0
 
     def test_join_result_items(self):
-        pass
+        result_obj = self.orm_manager.join_select(Cnc, Machine, _on={"Cnc.cncid": "Machine.cncid"})
+        result_obj.order_by(Cnc, by_primary_key=True)
+        print(len(result_obj))  # 8
+        result_obj.paginate(items_on_page=2, current_page=2)
+        self.assertEqual(2, result_obj.__len__())
+        items_hash_page_2 = sum(map(lambda x: x.hash_by_pk, result_obj))
+        _ = result_obj.next_page
+        items_hash_page_3 = sum(map(lambda x: x.hash_by_pk, result_obj))
+        self.assertEqual(3, result_obj.page)
+        self.assertNotEqual(items_hash_page_2, items_hash_page_3)
+        self.assertEqual(result_obj.__len__(), 2)
+        result_obj.page = 1
+        self.assertEqual(result_obj.__len__(), 2)
+        self.assertEqual(1, result_obj.page)
+        items_hash_page_1 = sum(map(lambda x: x.hash_by_pk, result_obj))
+        self.assertNotEqual(items_hash_page_1, items_hash_page_2)
+        self.assertNotEqual(items_hash_page_3, items_hash_page_2)
+        with self.assertRaises(IndexError):
+            _ = result_obj.next_page
+            result_obj.page = 6
+            result_obj.page = 0
+            result_obj.page = -2
+        with self.assertRaises(TypeError):
+            result_obj.page = "-1"
+            result_obj.page = None
+            result_obj.page = [2]
+            result_obj.page = 6.0
