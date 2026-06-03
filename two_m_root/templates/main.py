@@ -35,7 +35,7 @@ DATABASE_CONNECTION_ALIVE_SEC = 3
 CACHE_CONNECTION_ALIVE_SEC = 3
 
 # ResultPaginatorMixin
-ITEMS_ON_PAGE = float("inf")
+ITEMS_ON_PAGE = 25
 
 # OrderByMixin
 BY_PRIMARY_KEY = True
@@ -44,6 +44,12 @@ BY_CREATE_TIME = False
 BY_ALPHABET = True
 BY_STRING_LENGTH = False
 REVERSED = False
+
+# BaseSliceResultMixin
+UNIFORM_SAMPLING_DB_AND_CACHE = False  # Производить выборку данных из кеша и базы данных равномерно - половина на половину
+# Или сначала в результат пойдёт одна из категорий до исчерпания, а потом вторая
+# Внимание. Если данный режим включён, то минимальное количество элементов в срезе может сильно разниться,
+# и не будет соответствовать ожидаемой длине!
 
 #########
 # DEBUG #
