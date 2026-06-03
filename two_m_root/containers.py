@@ -836,7 +836,7 @@ class ResultORMCollection:
     ADD_TABLE_NAME_PREFIX: Literal["auto", "add", "no-prefix"] = ADD_TABLE_NAME_PREFIX
     CONTAINER = ServiceResultOrmContainer  # Тип, хранимый внутри, имутабелен
 
-    def __init__(self, collection: "ServiceOrmContainer", prefix_mode=None, show_hidden_nodes=None):
+    def __init__(self, collection: "ServiceOrmContainer", prefix_mode=None, show_hidden_nodes=False):
         def is_valid_collection(items):
             if type(items) is not ServiceOrmContainer:
                 raise TypeError
@@ -847,8 +847,6 @@ class ResultORMCollection:
             if not items:
                 return
             if type(items[0]) is not ServiceOrmItem:
-                raise TypeError
-            if not isinstance(self._show_hidden, (bool, type(None))):
                 raise TypeError
         self._prefix_mode = prefix_mode if prefix_mode is not None else self.ADD_TABLE_NAME_PREFIX
         self._show_hidden = show_hidden_nodes

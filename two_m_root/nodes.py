@@ -245,6 +245,8 @@ class ServiceOrmItem(QueueItem, AbsQueueNode):
     def __eq__(self, other: "ServiceOrmItem"):
         if type(other) is not type(self):
             return False
+        if not self.model.__name__ == other.model.__name__:
+            return False
         return str(self.hash_by_pk) == str(other.hash_by_pk)
 
     @staticmethod
